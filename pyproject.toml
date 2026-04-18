@@ -1,0 +1,34 @@
+[project]
+name = "safesum"
+version = "0.1.0"
+description = "Fine-tuning toolkit for safe summarization with built-in toxicity alignment"
+requires-python = "==3.12.*"
+
+dependencies = [
+
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.1.0",
+    "ipywidgets>=8.1.8",
+    "seaborn>=0.13.2",
+    "matplotlib>=3.10.8",
+    "ollama>=0.6.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.9.0,<0.10.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "safesum"
+module-root = "src"
+
+[tool.uv]
+keyring-provider = "subprocess"
+environments = [
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+    "sys_platform == 'darwin'",
+]
+extra-index-url = ["https://pypi.nvidia.com"]
