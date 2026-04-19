@@ -5,16 +5,19 @@ description = "Fine-tuning toolkit for safe summarization with built-in toxicity
 requires-python = "==3.12.*"
 
 dependencies = [
-
+    "datasets>=4.8.4",
+    "huggingface-hub>=1.11.0",
+    "tokenize-uk>=0.2.0",
+    "transformers>=5.5.4",
 ]
 
 [dependency-groups]
 dev = [
     "ipykernel>=7.1.0",
     "ipywidgets>=8.1.8",
-    "seaborn>=0.13.2",
     "matplotlib>=3.10.8",
-    "ollama>=0.6.1",
+    "pytest>=8.0",
+    "rouge-score>=0.1.2",
 ]
 
 [build-system]
