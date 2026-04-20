@@ -216,3 +216,5 @@ outputs/
 # Claude
 CLAUDE.md
 settings.local.*
+
+.vscode/

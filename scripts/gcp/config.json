@@ -1,0 +1,70 @@
+{
+  "taskGroups": [
+    {
+      "taskSpec": {
+        "runnables": [
+          {
+            "container": {
+              "imageUri": "${CONTAINER_IMAGE}",
+              "commands": ["bash", "-c", "${CONTAINER_COMMAND}"],
+              "options": "--shm-size=${SHM_SIZE}"
+            },
+            "environment": {
+              "secretVariables": {
+                "WANDB_API_KEY": "${WANDB_API_KEY_SECRET}",
+                "HF_TOKEN": "${HF_TOKEN_SECRET}"
+              }
+            }
+          }
+        ],
+        "volumes": [
+          {
+            "gcs": {
+              "remotePath": "${BUCKET_PATH}"
+            },
+            "mountPath": "${MOUNT_PATH}"
+          }
+        ],
+        "computeResource": {
+          "cpuMilli": "${CPU_MILLI}",
+          "memoryMib": "${MEMORY_MIB}"
+        }
+      },
+      "taskCount": 1,
+      "parallelism": 1
+    }
+  ],
+  "allocationPolicy": {
+    "serviceAccount": {
+      "email": "${BATCH_SERVICE_ACCOUNT_EMAIL}"
+    },
+    "instances": [
+      {
+        "installGpuDrivers": true,
+        "policy": {
+          "provisioningModel": "${PROVISIONING_MODEL}",
+          "reservation": "${RESERVATION}",
+          "machineType": "${MACHINE_TYPE}",
+          "bootDisk": {
+            "image": "projects/batch-custom-image/global/images/family/batch-cos",
+            "sizeGb": "${BOOT_DISK_SIZE_GB}"
+          },
+          "accelerators": [
+            {
+              "type": "${GPU_TYPE}",
+              "count": "${GPU_COUNT}"
+            }
+          ]
+        }
+      }
+    ],
+    "location": {
+      "allowedLocations": [
+        "${ALLOWED_LOCATION}"
+      ]
+    }
+  },
+  "logsPolicy": {
+    "destination": "${LOGS_DESTINATION}"
+  }
+}
