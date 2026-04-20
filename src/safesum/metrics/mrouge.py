@@ -1,10 +1,9 @@
 """Multilingual ROUGE scorer with pluggable tokenization."""
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
-
-from collections import Counter
 
 from safesum.utils.text import lcs_length, lcs_ref_indices, ngrams, split_sentences
 

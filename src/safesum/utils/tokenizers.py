@@ -26,6 +26,17 @@ def _strip_punct(token: str) -> str:
     return _PUNCT_RE.sub("", token)
 
 
+def _require_tokenize_uk():
+    try:
+        import tokenize_uk  # type: ignore
+        return tokenize_uk
+    except ImportError as e:
+        raise ImportError(
+            "tokenize-uk is required for Ukrainian processing. "
+            "Install it with: uv add tokenize-uk"
+        ) from e
+
+
 def whitespace_tokenizer(text: str) -> List[str]:
     """
     Whitespace tokenizer with punctuation stripping.
@@ -35,12 +46,7 @@ def whitespace_tokenizer(text: str) -> List[str]:
     after stripping are dropped.  Mirrors the BasicTokenizer pre-processing
     step used in the XL-Sum multilingual rouge scorer.
     """
-    result = []
-    for token in text.lower().split():
-        cleaned = _strip_punct(token)
-        if cleaned:
-            result.append(cleaned)
-    return result
+    return [t for token in text.lower().split() if (t := _strip_punct(token))]
 
 
 def make_uk_tokenizer():
@@ -54,18 +60,12 @@ def make_uk_tokenizer():
 
     Requires: ``tokenize-uk``
     """
-    try:
-        from tokenize_uk import tokenize_words  # type: ignore
-    except ImportError as e:
-        raise ImportError(
-            "tokenize-uk is required for Ukrainian tokenization. "
-            "Install it with: uv add tokenize-uk"
-        ) from e
+    tok = _require_tokenize_uk()
 
     def tokenize(text: str) -> List[str]:
         return [
             t.lower()
-            for t in tokenize_words(_normalize_uk(text))
+            for t in tok.tokenize_words(_normalize_uk(text))
             if re.search(r"\w", t, re.UNICODE)
         ]
 
@@ -83,16 +83,10 @@ def make_uk_sentence_splitter():
 
     Requires: ``tokenize-uk``
     """
-    try:
-        from tokenize_uk import tokenize_sents  # type: ignore
-    except ImportError as e:
-        raise ImportError(
-            "tokenize-uk is required for Ukrainian sentence splitting. "
-            "Install it with: uv add tokenize-uk"
-        ) from e
+    tok = _require_tokenize_uk()
 
     def split(text: str) -> List[str]:
-        return [s for s in tokenize_sents(_normalize_uk(text)) if s.strip()]
+        return [s for s in tok.tokenize_sents(_normalize_uk(text)) if s.strip()]
 
     return split
 
