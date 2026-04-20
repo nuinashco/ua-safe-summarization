@@ -208,3 +208,11 @@ __marimo__/
 
 .DS_Store
 tmp/
+
+data/
+!scripts/data/
+outputs/
+
+# Claude
+CLAUDE.md
+settings.local.*
