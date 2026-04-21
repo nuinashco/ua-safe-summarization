@@ -1,0 +1,65 @@
+defaults:
+  - _self_
+
+hydra:
+  job:
+    chdir: false
+
+model:
+  name: unsloth/gemma-3-1b-it
+  max_seq_length: 2048
+  load_in_4bit: false
+  load_in_8bit: false
+  full_finetuning: true
+
+dataset:
+  path: nuinashco/xlsum-ua-processed
+  split: train
+  prompt_column: prompt
+  summary_column: summary
+  chat_template: gemma-3
+  system_prompt: |
+    Ти — стислий сумаризатор українських новин.
+    Пиши виключно українською. Обсяг: 1–2 речення. Без вступних фраз.
+  val_size: 0.02        # 0 to disable eval split
+  seed: 3407
+  num_proc: 4
+
+masking:
+  train_on_responses_only: true
+  instruction_part: "<start_of_turn>user\n"
+  response_part: "<start_of_turn>model\n"
+
+# Passed straight through to trl.SFTConfig.
+training:
+  output_dir: outputs/gemma3-1b-xlsum-ua
+  dataset_text_field: prompt
+  packing: false
+  per_device_train_batch_size: 4
+  per_device_eval_batch_size: 2
+  gradient_accumulation_steps: 2
+  warmup_ratio: 0.03
+  num_train_epochs: 1
+  max_steps: -1
+  learning_rate: 2.0e-5
+  optim: adamw_8bit
+  weight_decay: 0.0
+  max_grad_norm: 1.0
+  lr_scheduler_type: cosine
+  bf16: true
+  fp16: false
+  gradient_checkpointing: true
+  dataset_num_proc: 4
+  logging_steps: 10
+  save_strategy: steps
+  save_steps: 500
+  save_total_limit: 2
+  eval_strategy: steps
+  eval_steps: 500
+  seed: 3407
+  report_to: wandb
+
+wandb:
+  project: gemma3-xlsum-ua
+  name: gemma3-1b-sft
+  entity: ivan-havlytskyiz

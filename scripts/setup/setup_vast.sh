@@ -9,6 +9,11 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 uv sync
 
+# unsloth
+source .venv/bin/activate
+uv pip install unsloth --torch-backend=auto
+pip uninstall unsloth unsloth_zoo -y && pip install --no-deps git+https://github.com/unslothai/unsloth_zoo.git && pip install --no-deps git+https://github.com/unslothai/unsloth.git
+
 # login
 huggingface-cli login --token $HUGGINGFACE_TOKEN
 wandb login
