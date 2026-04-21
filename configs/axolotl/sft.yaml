@@ -1,0 +1,86 @@
+base_model: google/gemma-3-1b-it
+model_type: AutoModelForCausalLM
+tokenizer_type: AutoTokenizer
+
+load_in_8bit: false
+load_in_4bit: true
+strict: false
+
+# ---- Dataset ----
+chat_template: gemma3
+
+datasets:
+  - path: nuinashco/xlsum-ua-processed
+    type: chat_template
+    field_messages: messages
+    message_property_mappings:
+      role: role
+      content: content
+    roles_to_train: ["assistant"]
+    chat_template_jinja: null
+    field_system: null
+    system_prompt: |
+      Ти — стислий сумаризатор українських новин.
+      Пиши виключно українською. Обсяг: 1–2 речення. Без вступних фраз.
+    field_human: prompt
+    field_model: summary
+
+dataset_prepared_path: ./last_run_prepared
+val_set_size: 0.02
+output_dir: ./outputs/gemma3-1b-xlsum-ua-lora
+
+# ---- Sequence / packing ----
+sequence_len: 2048
+sample_packing: true
+pad_to_sequence_len: true
+eval_sample_packing: false
+
+# ---- QLoRA ----
+adapter: qlora
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_target_linear: true
+lora_modules_to_save:
+  - embed_tokens
+  - lm_head
+
+# ---- Training schedule ----
+num_epochs: 1
+micro_batch_size: 2
+gradient_accumulation_steps: 8
+learning_rate: 2e-4
+lr_scheduler: cosine
+warmup_ratio: 0.03
+optimizer: paged_adamw_8bit
+weight_decay: 0.0
+max_grad_norm: 1.0
+
+# ---- Precision / memory (T4-specific) ----
+bf16: false
+fp16: true
+tf32: false
+gradient_checkpointing: true
+gradient_checkpointing_kwargs:
+  use_reentrant: false
+flash_attention: false      # T4 sm_75 does NOT support flash-attn
+sdp_attention: true
+
+# ---- Eval / checkpointing ----
+evals_per_epoch: 2
+saves_per_epoch: 1
+save_total_limit: 3
+logging_steps: 10
+
+# ---- Tokens ----
+special_tokens:
+  pad_token: <pad>
+
+# ---- W&B ----
+wandb_project: gemma3-1b-xlsum-ua
+wandb_entity: ivan-havlytskyiz
+wandb_name: gemma3-1b-lora-t4
+wandb_log_model: checkpoint
+wandb_watch: all
+
+seed: 42
