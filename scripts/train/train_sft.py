@@ -6,8 +6,14 @@ from __future__ import annotations
 import logging
 import os
 
+import wandb
 import hydra
+from pathlib import Path
+from datasets import load_dataset
 from omegaconf import DictConfig, OmegaConf
+from unsloth import FastModel
+from unsloth.chat_templates import get_chat_template, train_on_responses_only
+from trl import SFTConfig, SFTTrainer
 
 log = logging.getLogger(__name__)
 
@@ -18,7 +24,6 @@ def main(cfg: DictConfig) -> None:
     _configure_wandb(cfg)
 
     model, tokenizer = _load_model(cfg)
-    from unsloth.chat_templates import get_chat_template
     tokenizer = get_chat_template(tokenizer, chat_template=cfg.dataset.chat_template)
     train_ds, eval_ds = _load_dataset(cfg, tokenizer)
     trainer = _build_trainer(cfg, model, tokenizer, train_ds, eval_ds)
@@ -29,12 +34,18 @@ def main(cfg: DictConfig) -> None:
     trainer.save_model(cfg.training.output_dir)
     tokenizer.save_pretrained(cfg.training.output_dir)
 
+    if wandb.run is not None:
+        run_id_path = Path(cfg.training.output_dir) / "wandb_run_id.txt"
+        run_id_path.write_text(wandb.run.id)
+        log.info("Saved wandb run ID to %s — pass to validate_sft.py to resume this run", run_id_path)
+
 
 def _configure_wandb(cfg: DictConfig) -> None:
     report_to = cfg.training.get("report_to")
     uses_wandb = report_to == "wandb" or (isinstance(report_to, (list, tuple)) and "wandb" in report_to)
     if not uses_wandb:
         return
+    os.environ.setdefault("WANDB_LOG_MODEL", "false")
     if cfg.wandb.get("project"):
         os.environ.setdefault("WANDB_PROJECT", cfg.wandb.project)
     if cfg.wandb.get("entity"):
@@ -44,8 +55,6 @@ def _configure_wandb(cfg: DictConfig) -> None:
 
 
 def _load_model(cfg: DictConfig):
-    from unsloth import FastModel
-
     log.info("Loading %s full_finetuning=%s", cfg.model.name, cfg.model.full_finetuning)
     model, tokenizer = FastModel.from_pretrained(
         model_name=cfg.model.name,
@@ -59,8 +68,6 @@ def _load_model(cfg: DictConfig):
 
 
 def _load_dataset(cfg: DictConfig, tokenizer):
-    from datasets import load_dataset
-
     log.info("Loading dataset %s  split=%s", cfg.dataset.path, cfg.dataset.split)
     ds = load_dataset(cfg.dataset.path, split=cfg.dataset.split, token=os.environ.get("HF_TOKEN"))
     log.info("Loaded %d examples  columns=%s", len(ds), ds.column_names)
@@ -110,8 +117,6 @@ def _format_for_chat(ds, tokenizer, cfg: DictConfig):
 
 
 def _build_trainer(cfg: DictConfig, model, tokenizer, train_ds, eval_ds):
-    from trl import SFTConfig, SFTTrainer
-
     training_kwargs = OmegaConf.to_container(cfg.training, resolve=True)
     if eval_ds is None:
         training_kwargs.pop("eval_strategy", None)
@@ -127,8 +132,6 @@ def _build_trainer(cfg: DictConfig, model, tokenizer, train_ds, eval_ds):
     )
 
     if cfg.masking.train_on_responses_only:
-        from unsloth.chat_templates import train_on_responses_only
-
         trainer = train_on_responses_only(
             trainer,
             instruction_part=cfg.masking.instruction_part,
