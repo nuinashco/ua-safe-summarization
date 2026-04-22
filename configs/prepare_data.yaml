@@ -18,7 +18,13 @@ truncation:
 
 prompt:
   # Use {column_name} placeholders from any dataset column.
-  template: "ЗАГОЛОВОК: {title}\nТЕКСТ: {text}\n\nПІДСУМОК:"
+  # System-prompt-like instructions are inlined here because Gemma-3 has no system turn.
+  template: |-
+    Ти — стислий сумаризатор українських новин.
+    Обсяг: 1–2 речення. Без вступних фраз.
+
+    ЗАГОЛОВОК: {title}
+    ТЕКСТ: {text}
   output_column: prompt
 
 output:

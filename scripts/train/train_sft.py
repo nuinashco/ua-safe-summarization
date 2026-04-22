@@ -84,15 +84,13 @@ def _load_dataset(cfg: DictConfig, tokenizer):
 def _format_for_chat(ds, tokenizer, cfg: DictConfig):
     prompt_col = cfg.dataset.prompt_column
     summary_col = cfg.dataset.summary_column
-    system_prompt = cfg.dataset.get("system_prompt")
     text_field = cfg.training.dataset_text_field
 
     def _format(batch: dict) -> dict:
         texts = []
         for prompt, summary in zip(batch[prompt_col], batch[summary_col]):
-            user_content = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
             messages = [
-                {"role": "user", "content": user_content},
+                {"role": "user", "content": prompt},
                 {"role": "assistant", "content": summary},
             ]
             text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)

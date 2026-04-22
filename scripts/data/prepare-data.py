@@ -25,7 +25,7 @@ def main(cfg: DictConfig) -> None:
 def _load_dataset(cfg: DictConfig) -> Dataset:
     from datasets import load_dataset
 
-    kwargs: dict = {"path": cfg.dataset.path, "split": cfg.dataset.split}
+    kwargs: dict = {"path": cfg.dataset.path, "split": cfg.dataset.split, "trust_remote_code": True}
     if cfg.dataset.get("name"):
         kwargs["name"] = cfg.dataset.name
 
