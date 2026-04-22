@@ -18,7 +18,8 @@ def main(cfg: DictConfig) -> None:
     _configure_wandb(cfg)
 
     model, tokenizer = _load_model(cfg)
-    tokenizer = _apply_chat_template(tokenizer, cfg)
+    from unsloth.chat_templates import get_chat_template
+    tokenizer = get_chat_template(tokenizer, chat_template=cfg.dataset.chat_template)
     train_ds, eval_ds = _load_dataset(cfg, tokenizer)
     trainer = _build_trainer(cfg, model, tokenizer, train_ds, eval_ds)
 
@@ -45,7 +46,7 @@ def _configure_wandb(cfg: DictConfig) -> None:
 def _load_model(cfg: DictConfig):
     from unsloth import FastModel
 
-    log.info("Loading %s  full_finetuning=%s", cfg.model.name, cfg.model.full_finetuning)
+    log.info("Loading %s full_finetuning=%s", cfg.model.name, cfg.model.full_finetuning)
     model, tokenizer = FastModel.from_pretrained(
         model_name=cfg.model.name,
         max_seq_length=cfg.model.max_seq_length,
@@ -57,23 +58,25 @@ def _load_model(cfg: DictConfig):
     return model, tokenizer
 
 
-def _apply_chat_template(tokenizer, cfg: DictConfig):
-    from unsloth.chat_templates import get_chat_template
-
-    return get_chat_template(tokenizer, chat_template=cfg.dataset.chat_template)
-
-
 def _load_dataset(cfg: DictConfig, tokenizer):
     from datasets import load_dataset
 
     log.info("Loading dataset %s  split=%s", cfg.dataset.path, cfg.dataset.split)
     ds = load_dataset(cfg.dataset.path, split=cfg.dataset.split, token=os.environ.get("HF_TOKEN"))
     log.info("Loaded %d examples  columns=%s", len(ds), ds.column_names)
-
     ds = _format_for_chat(ds, tokenizer, cfg)
 
-    if cfg.dataset.val_size and cfg.dataset.val_size > 0:
-        split = ds.train_test_split(test_size=cfg.dataset.val_size, seed=cfg.dataset.seed)
+    val_split = cfg.dataset.get("val_split")
+    if val_split:
+        log.info("Loading eval split: %s", val_split)
+        eval_ds = load_dataset(cfg.dataset.path, split=val_split, token=os.environ.get("HF_TOKEN"))
+        eval_ds = _format_for_chat(eval_ds, tokenizer, cfg)
+        log.info("Train/val: %d / %d", len(ds), len(eval_ds))
+        return ds, eval_ds
+
+    val_size = cfg.dataset.get("val_size")
+    if val_size and val_size > 0:
+        split = ds.train_test_split(test_size=val_size, seed=cfg.dataset.get("seed", 42))
         train_ds, eval_ds = split["train"], split["test"]
         log.info("Train/val split: %d / %d", len(train_ds), len(eval_ds))
         return train_ds, eval_ds
