@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 
 import hydra
 import wandb
@@ -25,8 +24,8 @@ from omegaconf import DictConfig, OmegaConf
 from transformers import AutoTokenizer
 from vllm import LLM, SamplingParams
 
-from safesum.metrics import MRougeScorer
-from safesum.utils import make_uk_sentence_splitter, make_uk_tokenizer
+from safesum.metrics import MRougeScorer, make_uk_sentence_splitter, make_uk_tokenizer
+from safesum.training import resume_wandb
 
 log = logging.getLogger(__name__)
 
@@ -45,7 +44,7 @@ def main(cfg: DictConfig) -> None:
         log.error("No split configured; set validation.split or dataset.val_split.")
         return
 
-    _resume_wandb(cfg)
+    resume_wandb(cfg)
 
     log.info("Loading split '%s'", split)
     ds = load_dataset(cfg.dataset.path, split=split, token=os.environ.get("HF_TOKEN"))
@@ -88,32 +87,6 @@ def main(cfg: DictConfig) -> None:
     if wandb.run is not None:
         wandb.log(report)
         wandb.finish()
-
-
-def _resume_wandb(cfg: DictConfig) -> None:
-    report_to = cfg.training.get("report_to")
-    uses_wandb = report_to == "wandb" or (
-        isinstance(report_to, (list, tuple)) and "wandb" in report_to
-    )
-    if not uses_wandb:
-        return
-
-    run_id = cfg.wandb.get("run_id")
-    if not run_id:
-        run_id_path = Path(cfg.training.output_dir) / "wandb_run_id.txt"
-        if run_id_path.exists():
-            run_id = run_id_path.read_text().strip()
-            log.info("Resuming wandb run %s (from %s)", run_id, run_id_path)
-
-    if run_id:
-        wandb.init(
-            id=run_id,
-            resume="must",
-            project=cfg.wandb.get("project"),
-            entity=cfg.wandb.get("entity"),
-        )
-    else:
-        log.warning("No wandb run ID found; metrics will not be logged to wandb.")
 
 
 if __name__ == "__main__":

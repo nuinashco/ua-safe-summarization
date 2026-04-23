@@ -5,7 +5,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from safesum.utils.text import lcs_length, lcs_ref_indices, ngrams, split_sentences
+from safesum.metrics._text import lcs_length, lcs_ref_indices, ngrams, split_sentences
 
 
 Tokenizer = Callable[[str], List[str]]

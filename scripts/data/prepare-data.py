@@ -7,7 +7,7 @@ from datasets import Dataset
 from omegaconf import DictConfig, OmegaConf
 from transformers import AutoTokenizer
 
-from safesum.utils.data import add_prompt_column, truncate_dataset_column
+from safesum.dataset import add_prompt_column, truncate_dataset_column
 
 log = logging.getLogger(__name__)
 

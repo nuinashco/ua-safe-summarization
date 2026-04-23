@@ -1,0 +1,75 @@
+defaults:
+  - _self_
+
+hydra:
+  job:
+    chdir: false
+
+model:
+  name: unsloth/gemma-3-1b-it
+  max_seq_length: 2048
+  load_in_4bit: false
+  load_in_8bit: false
+  full_finetuning: false   # GRPO runs LoRA; full finetuning is too expensive
+
+lora:
+  r: 16
+  lora_alpha: 16
+  lora_dropout: 0.0
+  bias: none
+  random_state: 3407
+  finetune_vision_layers: false
+  finetune_language_layers: true
+  finetune_attention_modules: true   # attention is most important for RL
+  finetune_mlp_modules: true
+
+dataset:
+  path: nuinashco/xlsum-ua-processed
+  split: train
+  prompt_column: prompt
+  summary_column: summary
+  chat_template: gemma-3
+  num_proc: 4
+
+rewards:
+  - key: toxicity
+    reward_model: textdetox/xlmr-large-toxicity-classifier-v2
+  - key: rouge
+    rouge_type: rougeLsum
+  - key: length
+    tokenizer: ${model.name}
+    min_tokens: 50
+    max_tokens: 150
+
+# Passed straight through to trl.GRPOConfig.
+training:
+  output_dir: outputs/gemma3-1b-grpo
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 4
+  learning_rate: 1.0e-6        # GRPO is sensitive; keep small
+  num_train_epochs: 1
+  max_steps: 500               # set -1 for full epoch
+  warmup_ratio: 0.05
+  lr_scheduler_type: cosine
+  optim: adamw_8bit
+  bf16: true
+  gradient_checkpointing: true
+  logging_steps: 5
+  save_strategy: steps
+  save_steps: 100
+  save_total_limit: 2
+  seed: 3407
+  report_to: wandb
+  # GRPO-specific
+  max_prompt_length: 512
+  max_completion_length: 256
+  num_generations: 4           # rollouts per prompt
+  temperature: 1.0             # higher diversity during rollout
+  top_p: 1.0
+  beta: 0.03                   # KL penalty strength (0.01–0.05 typical)
+  loss_type: dapo              # token-normalised variant — more stable than grpo_clip
+
+wandb:
+  project: gemma3-xlsum-ua-grpo
+  name: gemma3-1b-grpo
+  entity: ivan-havlytskyiz

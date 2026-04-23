@@ -61,7 +61,7 @@ def lcs_ref_indices(ref: Sequence[str], prd: Sequence[str]) -> frozenset:
     i, j = m, n
     while i > 0 and j > 0:
         if ref[i - 1] == prd[j - 1] and dp[i][j] == dp[i - 1][j - 1] + 1:
-            matched.add(i - 1)  # ref index
+            matched.add(i - 1)
             i -= 1
             j -= 1
         elif dp[i - 1][j] >= dp[i][j - 1]:
