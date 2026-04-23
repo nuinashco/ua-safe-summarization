@@ -19,7 +19,7 @@ dataset:
   summary_column: summary
   chat_template: gemma-3
   val_split: validation
-  eval_num_samples: 200  # rows used for both trainer eval-loss and the ROUGE callback; null = entire split
+  eval_num_samples: null  # null = entire split
   num_proc: 4
 
 masking:

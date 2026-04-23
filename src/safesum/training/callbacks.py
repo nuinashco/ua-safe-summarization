@@ -199,3 +199,9 @@ class VLLMManagerCallback(TrainerCallback):
         finally:
             self._engine.sleep()
             log.info("vLLM offloaded back to CPU after step %d", step)
+
+    def on_train_end(self, args, state, control, **kwargs) -> None:
+        if not state.is_world_process_zero:
+            return
+        if self._engine.is_initialised:
+            self._engine.destroy()

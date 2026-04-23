@@ -111,6 +111,21 @@ class VLLMEngine:
         """Offload engine weights to CPU (level 1)."""
         self.llm.sleep(level=1)
 
+    def destroy(self) -> None:
+        """Shut down the engine and destroy the NCCL process group it created."""
+        if self._llm is not None:
+            log.info("Destroying vLLM engine")
+            del self._llm
+            self._llm = None
+
+        try:
+            import torch.distributed as dist
+            if dist.is_available() and dist.is_initialized():
+                dist.destroy_process_group()
+                log.info("Destroyed torch distributed process group")
+        except Exception:
+            log.debug("destroy_process_group skipped or failed", exc_info=True)
+
     def sync_weights(self, model) -> None:
         """Overwrite live vLLM weights with the current training-model weights.
 
