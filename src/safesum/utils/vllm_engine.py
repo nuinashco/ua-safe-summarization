@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -81,9 +82,15 @@ class VLLMEngine:
             getattr(getattr(model, "config", None), "_name_or_path", None)
             or self._model_name
         )
+        # vLLM 0.17+ runs EngineCore in a subprocess by default (SyncMPClient),
+        # which serialises apply_model callables via msgpack and rejects lambdas
+        # and GPU-tensor closures. InprocClient runs EngineCore in the same
+        # process, so collective_rpc passes the callable directly — no pickle.
+        os.environ["VLLM_ENABLE_V1_MULTIPROCESSING"] = "0"
+
         log.info(
             "Initialising vLLM engine (model=%s, gpu_memory_utilization=%.2f, "
-            "enable_sleep_mode=True)",
+            "enable_sleep_mode=True, multiprocessing=off)",
             model_name,
             self._gpu_mem_util,
         )
