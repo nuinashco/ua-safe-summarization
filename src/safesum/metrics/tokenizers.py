@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 _PUNCT_RE = re.compile(r"[^\w]", re.UNICODE)
 
 # Apostrophe variants found in Ukrainian corpora (ʼ, `, ' curly).
-_APOS_RE = re.compile(r"[\u02BC\u0060\u2019]")
+_APOS_RE = re.compile(r"[ʼ`’]")
 
 
 def _normalize_uk(text: str) -> str:

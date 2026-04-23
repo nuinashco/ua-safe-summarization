@@ -6,14 +6,14 @@ from __future__ import annotations
 import logging
 import os
 
-import wandb
 import hydra
-from pathlib import Path
 from datasets import load_dataset
 from omegaconf import DictConfig, OmegaConf
-from unsloth import FastModel
 from unsloth.chat_templates import get_chat_template, train_on_responses_only
 from trl import SFTConfig, SFTTrainer
+
+from safesum.training import configure_wandb, save_run_id
+from safesum.training.model_utils import load_base_model
 
 log = logging.getLogger(__name__)
 
@@ -21,9 +21,9 @@ log = logging.getLogger(__name__)
 @hydra.main(version_base=None, config_path="../../configs", config_name="train_sft")
 def main(cfg: DictConfig) -> None:
     log.info("Config:\n%s", OmegaConf.to_yaml(cfg))
-    _configure_wandb(cfg)
+    configure_wandb(cfg)
 
-    model, tokenizer = _load_model(cfg)
+    model, tokenizer = load_base_model(cfg)
     tokenizer = get_chat_template(tokenizer, chat_template=cfg.dataset.chat_template)
     train_ds, eval_ds = _load_dataset(cfg, tokenizer)
     trainer = _build_trainer(cfg, model, tokenizer, train_ds, eval_ds)
@@ -34,37 +34,7 @@ def main(cfg: DictConfig) -> None:
     trainer.save_model(cfg.training.output_dir)
     tokenizer.save_pretrained(cfg.training.output_dir)
 
-    if wandb.run is not None:
-        run_id_path = Path(cfg.training.output_dir) / "wandb_run_id.txt"
-        run_id_path.write_text(wandb.run.id)
-        log.info("Saved wandb run ID to %s — pass to validate_sft.py to resume this run", run_id_path)
-
-
-def _configure_wandb(cfg: DictConfig) -> None:
-    report_to = cfg.training.get("report_to")
-    uses_wandb = report_to == "wandb" or (isinstance(report_to, (list, tuple)) and "wandb" in report_to)
-    if not uses_wandb:
-        return
-    os.environ.setdefault("WANDB_LOG_MODEL", "false")
-    if cfg.wandb.get("project"):
-        os.environ.setdefault("WANDB_PROJECT", cfg.wandb.project)
-    if cfg.wandb.get("entity"):
-        os.environ.setdefault("WANDB_ENTITY", cfg.wandb.entity)
-    if cfg.wandb.get("name"):
-        os.environ.setdefault("WANDB_NAME", cfg.wandb.name)
-
-
-def _load_model(cfg: DictConfig):
-    log.info("Loading %s full_finetuning=%s", cfg.model.name, cfg.model.full_finetuning)
-    model, tokenizer = FastModel.from_pretrained(
-        model_name=cfg.model.name,
-        max_seq_length=cfg.model.max_seq_length,
-        load_in_4bit=cfg.model.load_in_4bit,
-        load_in_8bit=cfg.model.load_in_8bit,
-        full_finetuning=cfg.model.full_finetuning,
-        token=os.environ.get("HF_TOKEN"),
-    )
-    return model, tokenizer
+    save_run_id(cfg)
 
 
 def _load_dataset(cfg: DictConfig, tokenizer):
