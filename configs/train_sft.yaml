@@ -19,6 +19,7 @@ dataset:
   summary_column: summary
   chat_template: gemma-3
   val_split: validation
+  eval_num_samples: null  # null = entire split
   num_proc: 4
 
 masking:
@@ -55,11 +56,22 @@ training:
   seed: 3407
   report_to: wandb
 
-validation:
+# Per-step ROUGE evaluation during training (VLLMManagerCallback).
+eval_callback:
   enabled: true
   split: ${dataset.val_split}
-  num_samples: null  # null = entire split
+  num_samples: ${dataset.eval_num_samples}
   max_new_tokens: 128
+  vllm:
+    gpu_memory_utilization: 0.5  # vLLM GPU fraction; rest stays free for the optimizer
+
+# Standalone final evaluation (scripts/validate/validate_sft.py).
+final_eval:
+  split: test
+  num_samples: null      # null = entire split
+  max_new_tokens: 256
+  vllm:
+    gpu_memory_utilization: 0.9
 
 wandb:
   project: gemma3-xlsum-ua

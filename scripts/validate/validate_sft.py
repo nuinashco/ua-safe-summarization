@@ -1,15 +1,18 @@
 #!/usr/bin/env -S uv run python
-"""Post-training ROUGE validation with vLLM — run after train_sft.py finishes.
+"""Final ROUGE evaluation on an arbitrary split using a saved checkpoint.
 
-Resumes the wandb run written to {output_dir}/wandb_run_id.txt so metrics
-appear on the same training run. Override with wandb.run_id=<id> if needed.
-Metrics are logged as {split}/rouge1 etc., so val and test runs stay separate.
+Resumes the wandb run written to {output_dir}/wandb_run_id.txt so test-set
+metrics appear on the same training run.  Override with wandb.run_id=<id>.
 
 Usage:
+    # test set evaluation after training (default: final_eval.split=test)
     python scripts/validate/validate_sft.py
-    python scripts/validate/validate_sft.py validation.num_samples=500
-    python scripts/validate/validate_sft.py validation.split=test
-    python scripts/validate/validate_sft.py training.output_dir=outputs/my-run wandb.run_id=abc123
+
+    # different split or checkpoint
+    python scripts/validate/validate_sft.py \
+        final_eval.split=validation \
+        training.output_dir=outputs/my-run \
+        wandb.run_id=abc123
 """
 
 from __future__ import annotations
@@ -34,29 +37,24 @@ log = logging.getLogger(__name__)
 def main(cfg: DictConfig) -> None:
     log.info("Config:\n%s", OmegaConf.to_yaml(cfg))
 
-    val_cfg = cfg.get("validation", {})
-    if not val_cfg.get("enabled", True):
-        log.info("Validation disabled in config; exiting.")
-        return
-
-    split = val_cfg.split
+    fe_cfg = cfg.final_eval
+    split = fe_cfg.split
     if not split:
-        log.error("No split configured; set validation.split or dataset.val_split.")
+        log.error("No split configured; set final_eval.split in the config.")
         return
 
     resume_wandb(cfg)
 
     log.info("Loading split '%s'", split)
     ds = load_dataset(cfg.dataset.path, split=split, token=os.environ.get("HF_TOKEN"))
-    num_samples = val_cfg.get("num_samples")
+    num_samples = fe_cfg.get("num_samples")
     if num_samples and num_samples < len(ds):
         ds = ds.select(range(num_samples))
-    log.info("Split '%s' samples: %d", split, len(ds))
+    log.info("Split '%s': %d samples", split, len(ds))
 
-    prompt_col = cfg.dataset.prompt_column
-    summary_col = cfg.dataset.summary_column
-    max_new_tokens = val_cfg.get("max_new_tokens", 256)
     output_dir = cfg.training.output_dir
+    max_new_tokens = fe_cfg.get("max_new_tokens", 256)
+    gpu_mem_util = fe_cfg.vllm.get("gpu_memory_utilization", 0.9)
 
     tokenizer = AutoTokenizer.from_pretrained(output_dir)
     prompts = [
@@ -65,14 +63,13 @@ def main(cfg: DictConfig) -> None:
             tokenize=False,
             add_generation_prompt=True,
         )
-        for p in ds[prompt_col]
+        for p in ds[cfg.dataset.prompt_column]
     ]
-    references: list[str] = list(ds[summary_col])
+    references: list[str] = list(ds[cfg.dataset.summary_column])
 
-    log.info("Running vLLM inference from %s", output_dir)
-    llm = LLM(model=output_dir)
-    sampling_params = SamplingParams(temperature=0, max_tokens=max_new_tokens)
-    outputs = llm.generate(prompts, sampling_params)
+    log.info("Running vLLM inference from %s (gpu_memory_utilization=%.2f)", output_dir, gpu_mem_util)
+    llm = LLM(model=output_dir, gpu_memory_utilization=gpu_mem_util)
+    outputs = llm.generate(prompts, SamplingParams(temperature=0, max_tokens=max_new_tokens))
     predictions = [o.outputs[0].text.strip() for o in outputs]
 
     scorer = MRougeScorer(
