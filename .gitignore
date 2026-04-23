@@ -221,3 +221,4 @@ settings.local.*
 
 wandb/
 unsloth_compiled_cache/
+examples/
