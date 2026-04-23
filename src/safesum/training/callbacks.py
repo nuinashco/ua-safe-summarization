@@ -59,27 +59,30 @@ class VLLMEvalCallback(ABC):
 class RougeEvalCallback(VLLMEvalCallback):
     """Macro-averaged ROUGE-1/2/L/Lsum on the Ukrainian validation split."""
 
-    def __init__(self) -> None:
+    def __init__(self, val_dataset=None) -> None:
+        self._val_dataset = val_dataset  # raw dataset passed from train_sft; avoids a second hub load
         self._val_prompts: list[str] | None = None
         self._val_refs: list[str] | None = None
         self._max_new_tokens: int = 128
         self._split: str = "validation"
 
     def setup(self, cfg: DictConfig, tokenizer) -> None:
-        from datasets import load_dataset
+        cb_cfg = cfg.eval_callback
+        self._split = cb_cfg.split
+        self._max_new_tokens = cb_cfg.get("max_new_tokens", 128)
 
-        val_cfg = cfg.validation
-        rouge_cfg = val_cfg.rouge_callback
-        self._split = val_cfg.split
-        self._max_new_tokens = val_cfg.get("max_new_tokens", 128)
+        if self._val_dataset is not None:
+            ds = self._val_dataset
+        else:
+            from datasets import load_dataset
+            log.info("Loading val split '%s' for ROUGE eval", self._split)
+            ds = load_dataset(
+                cfg.dataset.path,
+                split=self._split,
+                token=os.environ.get("HF_TOKEN"),
+            )
 
-        log.info("Loading val split '%s' for ROUGE eval", self._split)
-        ds = load_dataset(
-            cfg.dataset.path,
-            split=self._split,
-            token=os.environ.get("HF_TOKEN"),
-        )
-        num_samples = rouge_cfg.get("num_samples")
+        num_samples = cb_cfg.get("num_samples")
         if num_samples and num_samples < len(ds):
             ds = ds.select(range(num_samples))
         log.info("Val split loaded: %d samples", len(ds))
@@ -108,11 +111,11 @@ class RougeEvalCallback(VLLMEvalCallback):
             sentence_splitter=make_uk_sentence_splitter(),
         )
         corpus = scorer.score_corpus(self._val_refs, predictions)
-        report = {f"{self._split}/{k}": round(v.fmeasure * 100, 4) for k, v in corpus.items()}
+        report = {f"eval/{k}": round(v.fmeasure * 100, 4) for k, v in corpus.items()}
         log.info("Step %d ROUGE: %s", step, report)
 
         if wandb.run is not None:
-            wandb.log(report, step=step)
+            wandb.log(report)
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +126,7 @@ class VLLMManagerCallback(TrainerCallback):
     """Orchestrates a shared :class:`VLLMEngine` across multiple eval callbacks.
 
     Owns the engine lifecycle: initialises it once in ``on_train_begin``, then
-    on each ``on_save`` performs a single wake → sync-weights → run-all-evals
+    on each ``on_evaluate`` performs a single wake → sync-weights → run-all-evals
     → sleep cycle.  Each registered :class:`VLLMEvalCallback` gets the awake,
     weight-synced ``llm`` object and is responsible only for generation and
     metric logging.
@@ -132,7 +135,7 @@ class VLLMManagerCallback(TrainerCallback):
 
         engine = VLLMEngine(
             model_name=cfg.model.name,
-            gpu_memory_utilization=cfg.validation.vllm_engine.gpu_memory_utilization,
+            gpu_memory_utilization=cfg.eval_callback.vllm.gpu_memory_utilization,
             max_model_len=cfg.model.max_seq_length,
         )
         manager = VLLMManagerCallback(
@@ -171,7 +174,7 @@ class VLLMManagerCallback(TrainerCallback):
 
         self._engine.init(model)
 
-    def on_save(self, args, state, control, model=None, **kwargs) -> None:
+    def on_evaluate(self, args, state, control, model=None, metrics=None, **kwargs) -> None:
         if not state.is_world_process_zero:
             return
         if not self._engine.is_initialised:

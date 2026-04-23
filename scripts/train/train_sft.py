@@ -25,8 +25,8 @@ def main(cfg: DictConfig) -> None:
 
     model, tokenizer = load_base_model(cfg)
     tokenizer = get_chat_template(tokenizer, chat_template=cfg.dataset.chat_template)
-    train_ds, eval_ds = _load_dataset(cfg, tokenizer)
-    trainer = _build_trainer(cfg, model, tokenizer, train_ds, eval_ds)
+    train_ds, eval_ds, raw_eval_ds = _load_dataset(cfg, tokenizer)
+    trainer = _build_trainer(cfg, model, tokenizer, train_ds, eval_ds, raw_eval_ds)
 
     trainer.train()
 
@@ -46,19 +46,16 @@ def _load_dataset(cfg: DictConfig, tokenizer):
     val_split = cfg.dataset.get("val_split")
     if val_split:
         log.info("Loading eval split: %s", val_split)
-        eval_ds = load_dataset(cfg.dataset.path, split=val_split, token=os.environ.get("HF_TOKEN"))
-        eval_ds = _format_for_chat(eval_ds, tokenizer, cfg)
+        raw_eval_ds = load_dataset(cfg.dataset.path, split=val_split, token=os.environ.get("HF_TOKEN"))
+        n = cfg.dataset.get("eval_num_samples")
+        if n and n < len(raw_eval_ds):
+            log.info("Trimming eval split to %d samples (dataset.eval_num_samples)", n)
+            raw_eval_ds = raw_eval_ds.select(range(n))
+        eval_ds = _format_for_chat(raw_eval_ds, tokenizer, cfg)
         log.info("Train/val: %d / %d", len(ds), len(eval_ds))
-        return ds, eval_ds
+        return ds, eval_ds, raw_eval_ds
 
-    val_size = cfg.dataset.get("val_size")
-    if val_size and val_size > 0:
-        split = ds.train_test_split(test_size=val_size, seed=cfg.dataset.get("seed", 42))
-        train_ds, eval_ds = split["train"], split["test"]
-        log.info("Train/val split: %d / %d", len(train_ds), len(eval_ds))
-        return train_ds, eval_ds
-
-    return ds, None
+    return ds, None, None
 
 
 def _format_for_chat(ds, tokenizer, cfg: DictConfig):
@@ -86,7 +83,7 @@ def _format_for_chat(ds, tokenizer, cfg: DictConfig):
     )
 
 
-def _build_trainer(cfg: DictConfig, model, tokenizer, train_ds, eval_ds):
+def _build_trainer(cfg: DictConfig, model, tokenizer, train_ds, eval_ds, raw_eval_ds=None):
     training_kwargs = OmegaConf.to_container(cfg.training, resolve=True)
     if eval_ds is None:
         training_kwargs.pop("eval_strategy", None)
@@ -96,15 +93,15 @@ def _build_trainer(cfg: DictConfig, model, tokenizer, train_ds, eval_ds):
     callbacks = []
     eval_cbs = []
 
-    rouge_cfg = cfg.validation.get("rouge_callback")
-    if rouge_cfg and rouge_cfg.get("enabled"):
-        eval_cbs.append(RougeEvalCallback())
+    cb_cfg = cfg.get("eval_callback", {})
+    if cb_cfg and cb_cfg.get("enabled"):
+        eval_cbs.append(RougeEvalCallback(raw_eval_ds))
 
     if eval_cbs:
-        engine_cfg = cfg.validation.get("vllm_engine", {})
+        vllm_cfg = cb_cfg.get("vllm", {})
         engine = VLLMEngine(
             model_name=cfg.model.name,
-            gpu_memory_utilization=engine_cfg.get("gpu_memory_utilization", 0.5),
+            gpu_memory_utilization=vllm_cfg.get("gpu_memory_utilization", 0.5),
             max_model_len=cfg.model.get("max_seq_length", 2048),
         )
         callbacks.append(VLLMManagerCallback(engine, eval_cbs, cfg, tokenizer))
