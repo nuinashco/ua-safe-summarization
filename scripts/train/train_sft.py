@@ -103,7 +103,6 @@ def _build_trainer(cfg: DictConfig, model, tokenizer, train_ds, eval_ds):
     if eval_cbs:
         engine_cfg = cfg.validation.get("vllm_engine", {})
         engine = VLLMEngine(
-            model_name=cfg.model.name,
             gpu_memory_utilization=engine_cfg.get("gpu_memory_utilization", 0.5),
             max_model_len=cfg.model.get("max_seq_length", 2048),
         )

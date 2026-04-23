@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 import wandb
 from omegaconf import DictConfig
@@ -131,7 +132,6 @@ class VLLMManagerCallback(TrainerCallback):
     Usage::
 
         engine = VLLMEngine(
-            model_name=cfg.model.name,
             gpu_memory_utilization=cfg.validation.vllm_engine.gpu_memory_utilization,
             max_model_len=cfg.model.max_seq_length,
         )
@@ -159,40 +159,29 @@ class VLLMManagerCallback(TrainerCallback):
         self._cfg = cfg
         self._tokenizer = tokenizer
 
-    def on_train_begin(self, args, state, control, model=None, **kwargs) -> None:
+    def on_train_begin(self, args, state, control, **kwargs) -> None:
         if not state.is_world_process_zero:
             return
         if not self._engine.available:
             log.error("vLLM not installed; VLLMManagerCallback is disabled")
             return
-
         for cb in self._eval_callbacks:
             cb.setup(self._cfg, self._tokenizer)
 
-        self._engine.init(model)
-
-    def on_save(self, args, state, control, model=None, **kwargs) -> None:
-        if not state.is_world_process_zero:
-            return
-        if not self._engine.is_initialised:
+    def on_save(self, args, state, control, **kwargs) -> None:
+        if not state.is_world_process_zero or not self._engine.available:
             return
 
         step = state.global_step
-        log.info(
-            "vLLM wake+sync for %d eval callback(s) at step %d",
-            len(self._eval_callbacks),
-            step,
-        )
-        self._engine.wake_up()
-        try:
-            self._engine.sync_weights(model)
+        ckpt_dir = Path(args.output_dir) / f"checkpoint-{step}"
+        if not ckpt_dir.exists():
+            log.warning("Checkpoint %s not found; skipping eval at step %d", ckpt_dir, step)
+            return
+
+        log.info("Running %d eval callback(s) at step %d from %s", len(self._eval_callbacks), step, ckpt_dir)
+        with self._engine.for_checkpoint(str(ckpt_dir)) as llm:
             for cb in self._eval_callbacks:
                 try:
-                    cb.evaluate(self._engine.llm, step)
+                    cb.evaluate(llm, step)
                 except Exception:
-                    log.exception(
-                        "%s failed at step %d; continuing", type(cb).__name__, step
-                    )
-        finally:
-            self._engine.sleep()
-            log.info("vLLM offloaded back to CPU after step %d", step)
+                    log.exception("%s failed at step %d; continuing", type(cb).__name__, step)
