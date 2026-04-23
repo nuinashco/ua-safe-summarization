@@ -17,8 +17,10 @@ Usage:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
+from pathlib import Path
 
 import hydra
 import wandb
@@ -80,6 +82,21 @@ def main(cfg: DictConfig) -> None:
     corpus = scorer.score_corpus(references, predictions)
     report = {f"{split}/{k}": round(v.fmeasure * 100, 4) for k, v in corpus.items()}
     log.info("ROUGE: %s", report)
+
+    exp_dir = Path(output_dir).parent
+    results_dir = exp_dir / "results" / split
+    results_dir.mkdir(parents=True, exist_ok=True)
+
+    metrics_path = results_dir / "metrics.json"
+    metrics_path.write_text(json.dumps(report, ensure_ascii=False, indent=2))
+    log.info("Metrics saved to %s", metrics_path)
+
+    ids = ds["id"] if "id" in ds.column_names else list(range(len(ds)))
+    samples_path = results_dir / "samples.jsonl"
+    with samples_path.open("w", encoding="utf-8") as f:
+        for sample_id, pred in zip(ids, predictions):
+            f.write(json.dumps({"id": sample_id, "prediction": pred}, ensure_ascii=False) + "\n")
+    log.info("Samples saved to %s", samples_path)
 
     if wandb.run is not None:
         wandb.log(report)
