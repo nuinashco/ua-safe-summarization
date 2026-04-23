@@ -100,7 +100,7 @@ class RougeEvalCallback(VLLMEvalCallback):
         ]
         self._val_refs = list(ds[summary_col])
 
-    def evaluate(self, llm, step: int) -> None:
+    def evaluate(self, llm, step: int) -> dict:
         sampling_params = SamplingParams(temperature=0, max_tokens=self._max_new_tokens)
         outputs = llm.generate(self._val_prompts, sampling_params, use_tqdm=False)
         predictions = [o.outputs[0].text.strip() for o in outputs]
@@ -116,6 +116,8 @@ class RougeEvalCallback(VLLMEvalCallback):
 
         if wandb.run is not None:
             wandb.log(report)
+
+        return report
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +193,9 @@ class VLLMManagerCallback(TrainerCallback):
             self._engine.sync_weights(model)
             for cb in self._eval_callbacks:
                 try:
-                    cb.evaluate(self._engine.llm, step)
+                    result = cb.evaluate(self._engine.llm, step)
+                    if result and metrics is not None:
+                        metrics.update({k.replace("/", "_"): v for k, v in result.items()})
                 except Exception:
                     log.exception(
                         "%s failed at step %d; continuing", type(cb).__name__, step

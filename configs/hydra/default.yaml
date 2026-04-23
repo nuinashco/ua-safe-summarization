@@ -1,0 +1,4 @@
+job:
+  chdir: false
+run:
+  dir: outputs/${exp_name}/hydra

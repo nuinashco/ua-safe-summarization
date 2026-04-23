@@ -1,9 +1,11 @@
 defaults:
+  - hydra: default
   - _self_
 
-hydra:
-  job:
-    chdir: false
+
+exp_name: gemma3-1b-sft
+seed: 3407
+
 
 model:
   name: unsloth/gemma-3-1b-it
@@ -29,13 +31,14 @@ masking:
 
 # Passed straight through to trl.SFTConfig.
 training:
-  output_dir: outputs/gemma3-1b-xlsum-ua
+  output_dir: outputs/${exp_name}/checkpoints
+  logging_dir: outputs/${exp_name}/logs
   dataset_text_field: prompt
   per_device_train_batch_size: 8
   per_device_eval_batch_size: 8
   group_by_length: true
   warmup_ratio: 0.03
-  num_train_epochs: 1
+  num_train_epochs: 2
   max_steps: -1  # -1 = disabled; set e.g. 20 for a quick pipeline smoke-test
   learning_rate: 2.0e-5
   optim: adamw_8bit
@@ -51,9 +54,9 @@ training:
   eval_strategy: steps
   eval_steps: 500
   load_best_model_at_end: true
-  metric_for_best_model: eval_loss
-  greater_is_better: false
-  seed: 3407
+  metric_for_best_model: eval_rougeL
+  greater_is_better: true
+  seed: ${seed}
   report_to: wandb
 
 # Per-step ROUGE evaluation during training (VLLMManagerCallback).
@@ -69,12 +72,12 @@ eval_callback:
 final_eval:
   split: test
   num_samples: null      # null = entire split
-  max_new_tokens: 256
+  max_new_tokens: 128
   vllm:
     gpu_memory_utilization: 0.9
 
 wandb:
   project: gemma3-xlsum-ua
-  name: gemma3-1b-sft
+  name: ${exp_name}
   entity: ivan-havlytskyiz
   run_id: null  # set or auto-discovered from output_dir/wandb_run_id.txt by validate_sft.py
