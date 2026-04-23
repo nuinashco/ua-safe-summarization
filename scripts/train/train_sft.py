@@ -12,7 +12,7 @@ from omegaconf import DictConfig, OmegaConf
 from unsloth.chat_templates import get_chat_template, train_on_responses_only
 from trl import SFTConfig, SFTTrainer
 
-from safesum.training import configure_wandb, save_run_id
+from safesum.training import configure_wandb, save_run_id, RougeEvalCallback
 from safesum.training.model_utils import load_base_model
 
 log = logging.getLogger(__name__)
@@ -93,12 +93,19 @@ def _build_trainer(cfg: DictConfig, model, tokenizer, train_ds, eval_ds):
         training_kwargs.pop("eval_steps", None)
         training_kwargs.pop("per_device_eval_batch_size", None)
 
+    callbacks = []
+    rouge_cfg = cfg.validation.get("rouge_callback")
+    if rouge_cfg and rouge_cfg.get("enabled"):
+        callbacks.append(RougeEvalCallback(cfg))
+        log.info("RougeEvalCallback registered (fires on_save via vLLM subprocess)")
+
     trainer = SFTTrainer(
         model=model,
         tokenizer=tokenizer,
         train_dataset=train_ds,
         eval_dataset=eval_ds,
         args=SFTConfig(**training_kwargs),
+        callbacks=callbacks or None,
     )
 
     if cfg.masking.train_on_responses_only:

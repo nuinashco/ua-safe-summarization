@@ -60,6 +60,12 @@ validation:
   split: ${dataset.val_split}
   num_samples: null  # null = entire split
   max_new_tokens: 128
+  wandb_step: null  # injected by RougeEvalCallback; do not set manually
+
+  rouge_callback:
+    enabled: true
+    num_samples: 200  # examples sampled from val split for each per-step ROUGE run
+    gpu_memory_utilization: 0.5  # keeps room for the training process
 
 wandb:
   project: gemma3-xlsum-ua

@@ -69,8 +69,9 @@ def main(cfg: DictConfig) -> None:
     ]
     references: list[str] = list(ds[summary_col])
 
-    log.info("Running vLLM inference from %s", output_dir)
-    llm = LLM(model=output_dir)
+    gpu_mem_util = val_cfg.get("gpu_memory_utilization", 0.9)
+    log.info("Running vLLM inference from %s (gpu_memory_utilization=%.2f)", output_dir, gpu_mem_util)
+    llm = LLM(model=output_dir, gpu_memory_utilization=gpu_mem_util)
     sampling_params = SamplingParams(temperature=0, max_tokens=max_new_tokens)
     outputs = llm.generate(prompts, sampling_params)
     predictions = [o.outputs[0].text.strip() for o in outputs]
@@ -85,8 +86,11 @@ def main(cfg: DictConfig) -> None:
     log.info("ROUGE: %s", report)
 
     if wandb.run is not None:
-        wandb.log(report)
-        wandb.finish()
+        wandb_step = val_cfg.get("wandb_step")
+        wandb.log(report, step=int(wandb_step) if wandb_step is not None else None)
+        # Only finish when running standalone; as a callback subprocess the training run must stay open.
+        if wandb_step is None:
+            wandb.finish()
 
 
 if __name__ == "__main__":
