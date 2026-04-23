@@ -5,97 +5,18 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
-from typing import Any, Callable, List
 
 import hydra
 from datasets import load_dataset
 from omegaconf import DictConfig, OmegaConf
-from transformers import pipeline
 from unsloth import FastModel
 from unsloth.chat_templates import get_chat_template
 from trl import GRPOConfig, GRPOTrainer
 
-
-from safesum.metrics import MRougeScorer, make_uk_tokenizer, make_uk_sentence_splitter
-from safesum.training import configure_wandb, save_run_id
+from safesum.training import configure_wandb, save_run_id, REWARD_REGISTRY
 from safesum.training.model_utils import load_base_model
 
 log = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Reward helpers
-# ---------------------------------------------------------------------------
-
-def _extract_text(completions: List[Any]) -> List[str]:
-    """Normalise TRL completion format (message list or plain string) to strings."""
-    out = []
-    for c in completions:
-        if isinstance(c, list):
-            out.append(c[0]["content"] if c else "")
-        else:
-            out.append(str(c))
-    return out
-
-
-@dataclass
-class ToxicityReward:
-    """Returns p(non-toxic) in [0, 1] — higher is better."""
-
-    reward_model: str = "textdetox/xlmr-large-toxicity-classifier-v2"
-
-    def __post_init__(self) -> None:
-        self.pipe = pipeline(
-            task="text-classification",
-            model=self.reward_model,
-            device_map="auto",
-        )
-
-    def __call__(self, completions: List[Any], **_) -> List[float]:
-        texts = _extract_text(completions)
-        preds = self.pipe(texts, truncation=True, return_all_scores=True)
-        return [
-            float(next((s["score"] for s in row if s["label"] == "LABEL_0"), 0.0))
-            for row in preds
-        ]
-
-
-@dataclass
-class RougeReward:
-    """Returns ROUGE-L F1 against the reference summary in [0, 1]."""
-
-    rouge_type: str = "rougeLsum"
-
-    def __post_init__(self) -> None:
-        self.scorer = MRougeScorer([self.rouge_type], make_uk_tokenizer(), make_uk_sentence_splitter())
-
-    def __call__(self, completions: List[Any], summary: List[str] | None = None, **_) -> List[float]:
-        texts = _extract_text(completions)
-        if not summary:
-            return [0.0] * len(texts)
-        return [
-            self.scorer.score(ref, pred)[self.rouge_type].fmeasure
-            for ref, pred in zip(summary, texts)
-        ]
-
-
-def _make_length_reward(min_words: int, max_words: int) -> Callable:
-    """Soft reward in [-1, 1]: +1 inside range, linearly penalised outside."""
-    span = max(max_words - min_words, 1)
-
-    def length_reward(completions: List[Any], **_) -> List[float]:
-        scores = []
-        for text in _extract_text(completions):
-            n = len(text.split())
-            if min_words <= n <= max_words:
-                scores.append(1.0)
-            else:
-                dist = max(min_words - n, n - max_words)
-                scores.append(max(-1.0, 1.0 - dist / span))
-        return scores
-
-    return length_reward
 
 
 # ---------------------------------------------------------------------------
@@ -151,11 +72,12 @@ def _load_dataset(cfg: DictConfig):
 
 
 def _build_rewards(cfg: DictConfig) -> list:
-    return [
-        ToxicityReward(reward_model=cfg.reward.toxicity_model),
-        RougeReward(rouge_type=cfg.reward.rouge_type),
-        _make_length_reward(cfg.reward.length_min, cfg.reward.length_max),
-    ]
+    fns = []
+    for reward_cfg in cfg.rewards:
+        reward_cfg = OmegaConf.to_container(reward_cfg, resolve=True)
+        key = reward_cfg.pop("key")
+        fns.append(REWARD_REGISTRY[key](**reward_cfg))
+    return fns
 
 
 def _build_trainer(cfg: DictConfig, model, tokenizer, train_ds, reward_fns: list) -> GRPOTrainer:

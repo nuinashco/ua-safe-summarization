@@ -31,11 +31,15 @@ dataset:
   chat_template: gemma-3
   num_proc: 4
 
-reward:
-  toxicity_model: textdetox/xlmr-large-toxicity-classifier-v2
-  rouge_type: rougeL
-  length_min: 20    # word count lower bound
-  length_max: 200   # word count upper bound
+rewards:
+  - key: toxicity
+    reward_model: textdetox/xlmr-large-toxicity-classifier-v2
+  - key: rouge
+    rouge_type: rougeLsum
+  - key: length
+    tokenizer: ${model.name}
+    min_tokens: 50
+    max_tokens: 150
 
 # Passed straight through to trl.GRPOConfig.
 training:
