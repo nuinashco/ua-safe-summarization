@@ -2,64 +2,197 @@
 from __future__ import annotations
 
 import logging
-import subprocess
-from pathlib import Path
+import os
+from abc import ABC, abstractmethod
 
 import wandb
 from omegaconf import DictConfig
 from transformers import TrainerCallback
 
+from safesum.metrics import MRougeScorer, make_uk_sentence_splitter, make_uk_tokenizer
+from safesum.utils.vllm_engine import VLLMEngine
+
 log = logging.getLogger(__name__)
 
-_VALIDATE_SCRIPT = Path(__file__).parent.parent.parent.parent / "scripts" / "validate" / "validate_sft.py"
+try:
+    from vllm import SamplingParams
+    _VLLM_AVAILABLE = True
+except ImportError:
+    _VLLM_AVAILABLE = False
 
 
-class RougeEvalCallback(TrainerCallback):
-    """Spawns validate_sft.py via a vLLM subprocess at each checkpoint save."""
+# ---------------------------------------------------------------------------
+# Abstract base
+# ---------------------------------------------------------------------------
 
-    def __init__(self, cfg: DictConfig) -> None:
-        self._cfg = cfg
-        self._proc: subprocess.Popen | None = None
+class VLLMEvalCallback(ABC):
+    """Protocol for any evaluation task that needs vLLM generation.
 
-    def on_save(self, args, state, control, **kwargs) -> None:
-        rouge_cfg = self._cfg.validation.get("rouge_callback")
-        if not rouge_cfg or not rouge_cfg.get("enabled"):
-            return
+    Implement :meth:`setup` to load data once before training, and
+    :meth:`evaluate` to run the actual evaluation while the engine is awake
+    and weight-synced.  Register instances with :class:`VLLMManagerCallback`.
 
-        if self._proc and self._proc.poll() is None:
-            log.warning(
-                "Previous ROUGE eval still running (pid=%d); skipping step %d",
-                self._proc.pid,
-                state.global_step,
-            )
-            return
+    Example::
 
-        ckpt_dir = Path(args.output_dir) / f"checkpoint-{state.global_step}"
-        if not ckpt_dir.exists():
-            log.warning("Checkpoint dir %s not found; skipping ROUGE eval", ckpt_dir)
-            return
+        class BLEUEvalCallback(VLLMEvalCallback):
+            def setup(self, cfg, tokenizer):
+                ...  # build self._val_prompts / self._val_refs
 
-        cmd = [
-            "uv", "run", "python", str(_VALIDATE_SCRIPT),
-            f"training.output_dir={ckpt_dir}",
-            f"validation.wandb_step={state.global_step}",
-        ]
-        if wandb.run:
-            cmd.append(f"wandb.run_id={wandb.run.id}")
+            def evaluate(self, llm, step):
+                outputs = llm.generate(self._val_prompts, ...)
+                ...  # compute BLEU, log to wandb
+    """
 
-        num_samples = rouge_cfg.get("num_samples")
-        if num_samples:
-            cmd.append(f"validation.num_samples={num_samples}")
+    @abstractmethod
+    def setup(self, cfg: DictConfig, tokenizer) -> None:
+        """Load data and build prompts.  Called once before training starts."""
 
-        gpu_mem_util = rouge_cfg.get("gpu_memory_utilization")
-        if gpu_mem_util is not None:
-            cmd.append(f"validation.gpu_memory_utilization={gpu_mem_util}")
+    @abstractmethod
+    def evaluate(self, llm, step: int) -> None:
+        """Run evaluation using the awake, weight-synced vLLM instance."""
 
-        log_file = Path(args.output_dir) / f"rouge_eval_step{state.global_step}.log"
-        log.info("Spawning ROUGE eval for checkpoint-%d → %s", state.global_step, log_file)
-        self._proc = subprocess.Popen(
-            cmd,
-            stdout=log_file.open("w"),
-            stderr=subprocess.STDOUT,
+
+# ---------------------------------------------------------------------------
+# ROUGE eval
+# ---------------------------------------------------------------------------
+
+class RougeEvalCallback(VLLMEvalCallback):
+    """Macro-averaged ROUGE-1/2/L/Lsum on the Ukrainian validation split."""
+
+    def __init__(self) -> None:
+        self._val_prompts: list[str] | None = None
+        self._val_refs: list[str] | None = None
+        self._max_new_tokens: int = 128
+        self._split: str = "validation"
+
+    def setup(self, cfg: DictConfig, tokenizer) -> None:
+        from datasets import load_dataset
+
+        val_cfg = cfg.validation
+        rouge_cfg = val_cfg.rouge_callback
+        self._split = val_cfg.split
+        self._max_new_tokens = val_cfg.get("max_new_tokens", 128)
+
+        log.info("Loading val split '%s' for ROUGE eval", self._split)
+        ds = load_dataset(
+            cfg.dataset.path,
+            split=self._split,
+            token=os.environ.get("HF_TOKEN"),
         )
-        log.info("ROUGE eval subprocess pid=%d", self._proc.pid)
+        num_samples = rouge_cfg.get("num_samples")
+        if num_samples and num_samples < len(ds):
+            ds = ds.select(range(num_samples))
+        log.info("Val split loaded: %d samples", len(ds))
+
+        prompt_col = cfg.dataset.prompt_column
+        summary_col = cfg.dataset.summary_column
+
+        self._val_prompts = [
+            tokenizer.apply_chat_template(
+                [{"role": "user", "content": p}],
+                tokenize=False,
+                add_generation_prompt=True,
+            )
+            for p in ds[prompt_col]
+        ]
+        self._val_refs = list(ds[summary_col])
+
+    def evaluate(self, llm, step: int) -> None:
+        sampling_params = SamplingParams(temperature=0, max_tokens=self._max_new_tokens)
+        outputs = llm.generate(self._val_prompts, sampling_params, use_tqdm=False)
+        predictions = [o.outputs[0].text.strip() for o in outputs]
+
+        scorer = MRougeScorer(
+            rouge_types=["rouge1", "rouge2", "rougeL", "rougeLsum"],
+            tokenizer=make_uk_tokenizer(),
+            sentence_splitter=make_uk_sentence_splitter(),
+        )
+        corpus = scorer.score_corpus(self._val_refs, predictions)
+        report = {f"{self._split}/{k}": round(v.fmeasure * 100, 4) for k, v in corpus.items()}
+        log.info("Step %d ROUGE: %s", step, report)
+
+        if wandb.run is not None:
+            wandb.log(report, step=step)
+
+
+# ---------------------------------------------------------------------------
+# Trainer callback that orchestrates the engine + all eval callbacks
+# ---------------------------------------------------------------------------
+
+class VLLMManagerCallback(TrainerCallback):
+    """Orchestrates a shared :class:`VLLMEngine` across multiple eval callbacks.
+
+    Owns the engine lifecycle: initialises it once in ``on_train_begin``, then
+    on each ``on_save`` performs a single wake → sync-weights → run-all-evals
+    → sleep cycle.  Each registered :class:`VLLMEvalCallback` gets the awake,
+    weight-synced ``llm`` object and is responsible only for generation and
+    metric logging.
+
+    Usage::
+
+        engine = VLLMEngine(
+            model_name=cfg.model.name,
+            gpu_memory_utilization=cfg.validation.vllm_engine.gpu_memory_utilization,
+            max_model_len=cfg.model.max_seq_length,
+        )
+        manager = VLLMManagerCallback(
+            engine=engine,
+            eval_callbacks=[RougeEvalCallback()],
+            cfg=cfg,
+            tokenizer=tokenizer,
+        )
+        trainer = SFTTrainer(..., callbacks=[manager])
+
+    To add a new eval, implement :class:`VLLMEvalCallback` and append it to
+    ``eval_callbacks`` — the engine is shared automatically.
+    """
+
+    def __init__(
+        self,
+        engine: VLLMEngine,
+        eval_callbacks: list[VLLMEvalCallback],
+        cfg: DictConfig,
+        tokenizer,
+    ) -> None:
+        self._engine = engine
+        self._eval_callbacks = eval_callbacks
+        self._cfg = cfg
+        self._tokenizer = tokenizer
+
+    def on_train_begin(self, args, state, control, model=None, **kwargs) -> None:
+        if not state.is_world_process_zero:
+            return
+        if not self._engine.available:
+            log.error("vLLM not installed; VLLMManagerCallback is disabled")
+            return
+
+        for cb in self._eval_callbacks:
+            cb.setup(self._cfg, self._tokenizer)
+
+        self._engine.init(model)
+
+    def on_save(self, args, state, control, model=None, **kwargs) -> None:
+        if not state.is_world_process_zero:
+            return
+        if not self._engine.is_initialised:
+            return
+
+        step = state.global_step
+        log.info(
+            "vLLM wake+sync for %d eval callback(s) at step %d",
+            len(self._eval_callbacks),
+            step,
+        )
+        self._engine.wake_up()
+        try:
+            self._engine.sync_weights(model)
+            for cb in self._eval_callbacks:
+                try:
+                    cb.evaluate(self._engine.llm, step)
+                except Exception:
+                    log.exception(
+                        "%s failed at step %d; continuing", type(cb).__name__, step
+                    )
+        finally:
+            self._engine.sleep()
+            log.info("vLLM offloaded back to CPU after step %d", step)

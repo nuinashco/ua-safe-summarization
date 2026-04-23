@@ -12,7 +12,7 @@ from omegaconf import DictConfig, OmegaConf
 from unsloth.chat_templates import get_chat_template, train_on_responses_only
 from trl import SFTConfig, SFTTrainer
 
-from safesum.training import configure_wandb, save_run_id, RougeEvalCallback
+from safesum.training import configure_wandb, save_run_id, RougeEvalCallback, VLLMEngine, VLLMManagerCallback
 from safesum.training.model_utils import load_base_model
 
 log = logging.getLogger(__name__)
@@ -94,10 +94,25 @@ def _build_trainer(cfg: DictConfig, model, tokenizer, train_ds, eval_ds):
         training_kwargs.pop("per_device_eval_batch_size", None)
 
     callbacks = []
+    eval_cbs = []
+
     rouge_cfg = cfg.validation.get("rouge_callback")
     if rouge_cfg and rouge_cfg.get("enabled"):
-        callbacks.append(RougeEvalCallback(cfg))
-        log.info("RougeEvalCallback registered (fires on_save via vLLM subprocess)")
+        eval_cbs.append(RougeEvalCallback())
+
+    if eval_cbs:
+        engine_cfg = cfg.validation.get("vllm_engine", {})
+        engine = VLLMEngine(
+            model_name=cfg.model.name,
+            gpu_memory_utilization=engine_cfg.get("gpu_memory_utilization", 0.5),
+            max_model_len=cfg.model.get("max_seq_length", 2048),
+        )
+        callbacks.append(VLLMManagerCallback(engine, eval_cbs, cfg, tokenizer))
+        log.info(
+            "VLLMManagerCallback registered with %d eval callback(s): %s",
+            len(eval_cbs),
+            [type(cb).__name__ for cb in eval_cbs],
+        )
 
     trainer = SFTTrainer(
         model=model,

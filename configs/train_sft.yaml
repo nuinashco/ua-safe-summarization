@@ -62,10 +62,13 @@ validation:
   max_new_tokens: 128
   wandb_step: null  # injected by RougeEvalCallback; do not set manually
 
+  vllm_engine:
+    gpu_memory_utilization: 0.5  # vLLM GPU fraction; rest stays free for the optimizer
+    vllm_gpu: null  # reserved: colocate mode always uses the training GPU via sleep/wake_up
+
   rouge_callback:
     enabled: true
     num_samples: 200  # examples sampled from val split for each per-step ROUGE run
-    gpu_memory_utilization: 0.5  # keeps room for the training process
 
 wandb:
   project: gemma3-xlsum-ua
