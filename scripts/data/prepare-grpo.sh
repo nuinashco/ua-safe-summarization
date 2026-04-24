@@ -8,6 +8,8 @@
 
 set -euo pipefail
 
+set -a; source .env; set +a
+
 HF_REPO=""
 HYDRA_ARGS=()
 
@@ -20,7 +22,7 @@ done
 
 for split in train validation test; do
     echo "=== Split: $split ==="
-    uv run --env-file .env python scripts/data/prepare-data.py --config-name grpo "dataset.split=${split}" ${HYDRA_ARGS[@]+"${HYDRA_ARGS[@]}"}
+    uv run python scripts/data/prepare-data.py --config-name grpo "dataset.split=${split}" ${HYDRA_ARGS[@]+"${HYDRA_ARGS[@]}"}
 done
 
 if [[ -n "$HF_REPO" ]]; then

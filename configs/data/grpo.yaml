@@ -20,8 +20,8 @@ prompt:
   # Use {column_name} placeholders from any dataset column.
   # System-prompt-like instructions are inlined here because Gemma-3 has no system turn.
   template: |-
-    Ти — помічник, що стисло підсумовує українські новини.
-    Підсумуй наступний матеріал українською мовою (1–2 речення)
+    Ти — помічник, який редагує український текст, зберігаючи зміст.
+    Перепиши наступний текст. Обсяг: 1–2 речення.
 
     ТЕКСТ: {text}
   output_column: prompt
