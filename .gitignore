@@ -210,6 +210,7 @@ __marimo__/
 tmp/
 
 data/
+!configs/data/
 !scripts/data/
 outputs/
 

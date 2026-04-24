@@ -6,29 +6,28 @@ hydra:
     chdir: false
 
 dataset:
-  path: csebuetnlp/xlsum
-  name: ukrainian   # HF dataset config name — set to null to omit
+  path: ukr-detect/ukr-toxicity-dataset-seminatural
+  name: null
   split: train
 
 # Each entry truncates one column to max_tokens using the given HF tokenizer.
 truncation:
   - column: text
     tokenizer: google/gemma-3-1b-it
-    max_tokens: 2048
+    max_tokens: 512
 
 prompt:
   # Use {column_name} placeholders from any dataset column.
   # System-prompt-like instructions are inlined here because Gemma-3 has no system turn.
   template: |-
-    Ти — стислий сумаризатор українських новин.
-    Обсяг: 1–2 речення. Без вступних фраз.
+    Ти — помічник, що стисло підсумовує українські новини.
+    Підсумуй наступний матеріал українською мовою (1–2 речення)
 
-    ЗАГОЛОВОК: {title}
     ТЕКСТ: {text}
   output_column: prompt
 
 output:
-  dir: data/processed
+  dir: ${oc.env:GRPO_DATA_PATH}
   format: parquet   # parquet | json | jsonl | csv
   filename: null    # null → auto: {split}.{format}
   num_proc: 4       # parallelism for prompt mapping (truncation always uses 1)

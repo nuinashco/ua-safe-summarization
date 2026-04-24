@@ -12,7 +12,7 @@ from safesum.dataset import add_prompt_column, truncate_dataset_column
 log = logging.getLogger(__name__)
 
 
-@hydra.main(version_base=None, config_path="../../configs", config_name="prepare_data")
+@hydra.main(version_base=None, config_path="../../configs/data", config_name="sft")
 def main(cfg: DictConfig) -> None:
     log.info("Config:\n%s", OmegaConf.to_yaml(cfg))
 
