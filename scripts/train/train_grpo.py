@@ -19,8 +19,7 @@ from safesum.training import (
     configure_wandb,
     save_run_id,
     REWARD_REGISTRY,
-    RougeEvalCallback,
-    ToxicityEvalCallback,
+    build_eval_callbacks,
     VLLMEngine,
     VLLMManagerCallback,
     TRLVLLMManagerCallback,
@@ -51,7 +50,7 @@ def main(cfg: DictConfig) -> None:
     grpo_eval_ds = _load_grpo_eval_dataset(cfg)
 
     trainer = _build_trainer(cfg, model, tokenizer, train_ds, reward_fns, reward_weights, eval_ds=grpo_eval_ds)
-    _attach_eval_callback(trainer, cfg, tokenizer, sft_raw_ds, rewards_by_type)
+    _attach_eval_callback(trainer, cfg, tokenizer, sft_raw_ds)
 
     trainer.train()
 
@@ -146,36 +145,20 @@ def _build_rewards(cfg: DictConfig) -> tuple[list, list[float], dict]:
 # Callback helpers
 # ---------------------------------------------------------------------------
 
-def _attach_eval_callback(
-    trainer,
-    cfg: DictConfig,
-    tokenizer,
-    sft_raw_ds,
-    rewards_by_type: dict,
-) -> None:
+def _attach_eval_callback(trainer, cfg: DictConfig, tokenizer, sft_raw_ds) -> None:
     """Attach vLLM eval callbacks after the trainer is built.
-
-    Both ROUGE and toxicity evals run on the SFT validation split, sharing one
-    vLLM batch per eval step. ROUGE tracks summary-quality drift; toxicity is
-    expected to stay near 1.0 on SFT data (sanity / regression detector).
 
     With use_vllm=True + colocate mode, trainer.llm already exists and is
     weight-synced before each rollout batch, so we reuse it (TRLVLLMManagerCallback).
     Otherwise we spin up a separate VLLMEngine (VLLMManagerCallback).
     """
-    cb_cfg = cfg.get("eval_callback", {})
-    if not cb_cfg or not cb_cfg.get("enabled"):
+    cb_cfg = cfg.get("eval_callbacks", {})
+    if not cb_cfg:
         return
 
-    eval_callbacks = [RougeEvalCallback(val_dataset=sft_raw_ds)]
-
-    tox_reward = rewards_by_type.get("toxicity")
-    if tox_reward is not None:
-        eval_callbacks.append(
-            ToxicityEvalCallback(val_dataset=sft_raw_ds, toxicity_reward_fn=tox_reward)
-        )
-    else:
-        log.warning("No toxicity reward configured — skipping ToxicityEvalCallback")
+    eval_callbacks = build_eval_callbacks(cb_cfg, val_dataset=sft_raw_ds)
+    if not eval_callbacks:
+        return
 
     if getattr(trainer, "llm", None) is not None:
         callback = TRLVLLMManagerCallback(trainer.llm, eval_callbacks, cb_cfg, tokenizer)

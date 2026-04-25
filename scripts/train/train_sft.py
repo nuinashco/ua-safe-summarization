@@ -12,7 +12,7 @@ from omegaconf import DictConfig, OmegaConf
 from unsloth.chat_templates import get_chat_template, train_on_responses_only
 from trl import SFTConfig, SFTTrainer
 
-from safesum.training import configure_wandb, save_run_id, RougeEvalCallback, VLLMEngine, VLLMManagerCallback
+from safesum.training import configure_wandb, save_run_id, build_eval_callbacks, VLLMEngine, VLLMManagerCallback
 from safesum.training.model_utils import load_base_model
 
 log = logging.getLogger(__name__)
@@ -93,9 +93,9 @@ def _build_trainer(cfg: DictConfig, model, tokenizer, train_ds, eval_ds, raw_eva
     callbacks = []
     eval_cbs = []
 
-    cb_cfg = cfg.get("eval_callback", {})
-    if cb_cfg and cb_cfg.get("enabled"):
-        eval_cbs.append(RougeEvalCallback(raw_eval_ds))
+    cb_cfg = cfg.get("eval_callbacks", {})
+    if cb_cfg:
+        eval_cbs = build_eval_callbacks(cb_cfg, val_dataset=raw_eval_ds)
 
     if eval_cbs:
         vllm_cfg = cb_cfg.get("vllm", {})
@@ -104,7 +104,7 @@ def _build_trainer(cfg: DictConfig, model, tokenizer, train_ds, eval_ds, raw_eva
             gpu_memory_utilization=vllm_cfg.get("gpu_memory_utilization", 0.5),
             max_model_len=cfg.model.get("max_seq_length", 2048),
         )
-        callbacks.append(VLLMManagerCallback(engine, eval_cbs, cfg, tokenizer))
+        callbacks.append(VLLMManagerCallback(engine, eval_cbs, cb_cfg, tokenizer))
         log.info(
             "VLLMManagerCallback registered with %d eval callback(s): %s",
             len(eval_cbs),

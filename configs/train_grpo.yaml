@@ -1,28 +1,30 @@
 defaults:
+  - hydra: default
   - _self_
 
-hydra:
-  job:
-    chdir: false
+
+exp_name: gemma3-1b-grpo
+seed: 3407
+
 
 model:
   name: nuinashco/gemma-3-1b-it-xlsum-ua-sft
   max_seq_length: 3072
   load_in_4bit: false
   load_in_8bit: false
-  full_finetuning: false          # fast_inference requires LoRA, not full FT
-  fast_inference: true            # Unsloth attaches model.vllm_engine for TRL colocate
-  gpu_memory_utilization: 0.5     # shared with training.vllm_gpu_memory_utilization below
+  full_finetuning: false  # fast_inference requires LoRA, not full FT
+  fast_inference: true
+  gpu_memory_utilization: 0.5
   lora:
     r: 32
     alpha: 32
     dropout: 0
     bias: none
-    finetune_vision_layers: false   # gemma-3-1b is text-only; this is a no-op safety flag
+    finetune_vision_layers: false
     finetune_language_layers: true
     finetune_attention_modules: true
     finetune_mlp_modules: true
-    random_state: 3407
+    random_state: ${seed}
 
 dataset:
   path: nuinashco/ukr-toxicity-processed
@@ -31,9 +33,9 @@ dataset:
   chat_template: gemma-3
   num_proc: 4
   eval_split: validation
-  eval_num_samples: null
+  eval_num_samples: 200
 
-# SFT validation slice — eval callbacks run ROUGE + toxicity here to track summary quality drift.
+# SFT data used for ROUGE + toxicity eval callbacks during training
 sft_dataset:
   path: nuinashco/xlsum-ua-processed
   split: validation
@@ -53,20 +55,23 @@ rewards:
   #     min_tokens: 12
   #     max_tokens: 100
 
-eval_callback:
-  enabled: true
-  dataset: ${sft_dataset}        # both ROUGE and toxicity eval run on SFT data
-  num_samples: ${sft_dataset.num_samples}
-  max_new_tokens: 128
-  vllm_sleep_mode: ${training.vllm_enable_sleep_mode}
+eval_callbacks:
+  dataset: ${sft_dataset}
+  vllm:
+    max_new_tokens: 128
+    sleep_mode: ${training.vllm_enable_sleep_mode}
+  callbacks:
+    - type: rouge
+    - type: toxicity
 
-# Passed straight through to trl.GRPOConfig (reward_weights injected at runtime).
+# Passed straight through to trl.GRPOConfig.
 training:
-  output_dir: outputs/gemma3-1b-grpo
+  output_dir: outputs/${exp_name}/checkpoints
+  logging_dir: outputs/${exp_name}/logs
   per_device_train_batch_size: 8
-  learning_rate: 5e-6        # GRPO is sensitive; keep small
+  learning_rate: 5e-6  # GRPO is sensitive; keep small
   num_train_epochs: 1
-  max_steps: 3000               # set -1 for full epoch
+  max_steps: 1000  # set -1 for full epoch
   warmup_ratio: 0.05
   lr_scheduler_type: cosine
   optim: adamw_8bit
@@ -76,34 +81,27 @@ training:
   save_strategy: steps
   save_steps: 100
   save_total_limit: 2
-  seed: 3407
+  seed: ${seed}
   report_to: wandb
-  # Eval — on_evaluate fires our ROUGE+toxicity callbacks (+ TRL reward/KL metrics on SFT data).
-  # per_device_eval_batch_size must equal num_generations: colocate vLLM uses n=1 per prompt,
-  # so the eval batch arrives unexpanded (unlike training which pre-repeats each prompt
-  # num_generations times). With batch=8 and n=1 → 8 rewards → reshape(-1, 8) ✓
   eval_strategy: steps
-  eval_steps: 500
-  # Colocate vLLM uses n=1: eval prompts are NOT pre-expanded (unlike train), so rewards.numel()
-  # == per_device_eval_batch_size. Must be a multiple of num_generations for reshape(-1, G) to work.
-  # CANNOT use 8: Unsloth line 4234 silently overrides eval_batch=8 → train_batch when train < 8.
-  per_device_eval_batch_size: 16  # 2 × num_generations (8); avoids Unsloth's hardcoded override
-  dataloader_drop_last: true      # drop incomplete last batch so size is always divisible by num_generations
+  eval_steps: 100
+  per_device_eval_batch_size: 16  # must be a multiple of num_generations
+  dataloader_drop_last: true
+
   # GRPO-specific
   max_prompt_length: 512
   max_completion_length: 128
-  num_generations: 8           # rollouts per prompt
-  temperature: 1.0             # higher diversity during rollout
+  num_generations: 8    # rollouts per prompt
+  temperature: 1.0      # higher diversity during rollout
   top_p: 1.0
-  beta: 0.03                   # KL penalty strength (0.01–0.05 typical)
-  loss_type: dapo              # token-normalised variant — more stable than grpo_clip
-  # vLLM colocate — shares the engine with the ROUGE eval callback (no duplicate model copy)
+  beta: 0.03            # KL penalty strength (0.01–0.05 typical)
+  loss_type: dapo       # token-normalised variant — more stable than grpo_clip
   use_vllm: true
   vllm_mode: colocate
   vllm_gpu_memory_utilization: ${model.gpu_memory_utilization}
-  vllm_enable_sleep_mode: false  # weights offloaded to CPU between rollout batches
+  vllm_enable_sleep_mode: false  # offloads weights to CPU between rollout batches
 
 wandb:
   project: gemma3-xlsum-ua
-  name: gemma3-1b-grpo
+  name: ${exp_name}
   entity: ivan-havlytskyiz
