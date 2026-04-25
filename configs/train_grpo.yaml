@@ -1,54 +1,77 @@
 defaults:
+  - hydra: default
   - _self_
 
-hydra:
-  job:
-    chdir: false
+
+exp_name: gemma3-1b-grpo
+seed: 3407
+
 
 model:
-  name: unsloth/gemma-3-1b-it
-  max_seq_length: 2048
+  name: nuinashco/gemma-3-1b-it-xlsum-ua-sft
+  max_seq_length: 3072
   load_in_4bit: false
   load_in_8bit: false
-  full_finetuning: false   # GRPO runs LoRA; full finetuning is too expensive
-
-lora:
-  r: 16
-  lora_alpha: 16
-  lora_dropout: 0.0
-  bias: none
-  random_state: 3407
-  finetune_vision_layers: false
-  finetune_language_layers: true
-  finetune_attention_modules: true   # attention is most important for RL
-  finetune_mlp_modules: true
+  full_finetuning: false  # fast_inference requires LoRA, not full FT
+  fast_inference: true
+  gpu_memory_utilization: 0.5
+  lora:
+    r: 32
+    alpha: 32
+    dropout: 0
+    bias: none
+    finetune_vision_layers: false
+    finetune_language_layers: true
+    finetune_attention_modules: true
+    finetune_mlp_modules: true
+    random_state: ${seed}
 
 dataset:
-  path: nuinashco/xlsum-ua-processed
+  path: nuinashco/ukr-toxicity-processed
   split: train
   prompt_column: prompt
-  summary_column: summary
   chat_template: gemma-3
   num_proc: 4
+  eval_split: validation
+  eval_num_samples: 200
+
+# SFT data used for ROUGE + toxicity eval callbacks during training
+sft_dataset:
+  path: nuinashco/xlsum-ua-processed
+  split: validation
+  prompt_column: prompt
+  summary_column: summary
+  num_samples: null
 
 rewards:
-  - key: toxicity
-    reward_model: textdetox/xlmr-large-toxicity-classifier-v2
-  - key: rouge
-    rouge_type: rougeLsum
-  - key: length
-    tokenizer: ${model.name}
-    min_tokens: 50
-    max_tokens: 150
+  - type: toxicity
+    weight: 1.0
+    params:
+      reward_model: textdetox/xlmr-large-toxicity-classifier-v2
+  # - type: length
+  #   weight: 0.5
+  #   params:
+  #     tokenizer: ${model.name}
+  #     min_tokens: 12
+  #     max_tokens: 100
+
+eval_callbacks:
+  dataset: ${sft_dataset}
+  vllm:
+    max_new_tokens: 128
+    sleep_mode: ${training.vllm_enable_sleep_mode}
+  callbacks:
+    - type: rouge
+    - type: toxicity
 
 # Passed straight through to trl.GRPOConfig.
 training:
-  output_dir: outputs/gemma3-1b-grpo
-  per_device_train_batch_size: 2
-  gradient_accumulation_steps: 4
-  learning_rate: 1.0e-6        # GRPO is sensitive; keep small
+  output_dir: outputs/${exp_name}/checkpoints
+  logging_dir: outputs/${exp_name}/logs
+  per_device_train_batch_size: 8
+  learning_rate: 5e-6  # GRPO is sensitive; keep small
   num_train_epochs: 1
-  max_steps: 500               # set -1 for full epoch
+  max_steps: 1000  # set -1 for full epoch
   warmup_ratio: 0.05
   lr_scheduler_type: cosine
   optim: adamw_8bit
@@ -58,18 +81,27 @@ training:
   save_strategy: steps
   save_steps: 100
   save_total_limit: 2
-  seed: 3407
+  seed: ${seed}
   report_to: wandb
+  eval_strategy: steps
+  eval_steps: 100
+  per_device_eval_batch_size: 16  # must be a multiple of num_generations
+  dataloader_drop_last: true
+
   # GRPO-specific
   max_prompt_length: 512
-  max_completion_length: 256
-  num_generations: 4           # rollouts per prompt
-  temperature: 1.0             # higher diversity during rollout
+  max_completion_length: 128
+  num_generations: 8    # rollouts per prompt
+  temperature: 1.0      # higher diversity during rollout
   top_p: 1.0
-  beta: 0.03                   # KL penalty strength (0.01–0.05 typical)
-  loss_type: dapo              # token-normalised variant — more stable than grpo_clip
+  beta: 0.03            # KL penalty strength (0.01–0.05 typical)
+  loss_type: dapo       # token-normalised variant — more stable than grpo_clip
+  use_vllm: true
+  vllm_mode: colocate
+  vllm_gpu_memory_utilization: ${model.gpu_memory_utilization}
+  vllm_enable_sleep_mode: false  # offloads weights to CPU between rollout batches
 
 wandb:
-  project: gemma3-xlsum-ua-grpo
-  name: gemma3-1b-grpo
+  project: gemma3-xlsum-ua
+  name: ${exp_name}
   entity: ivan-havlytskyiz

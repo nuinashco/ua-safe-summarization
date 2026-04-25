@@ -210,8 +210,10 @@ __marimo__/
 tmp/
 
 data/
+!configs/data/
 !scripts/data/
 outputs/
+grpo_trainer_lora_model/
 
 # Claude
 CLAUDE.md

@@ -59,14 +59,19 @@ training:
   seed: ${seed}
   report_to: wandb
 
-# Per-step ROUGE evaluation during training (VLLMManagerCallback).
-eval_callback:
-  enabled: true
-  split: ${dataset.val_split}
-  num_samples: ${dataset.eval_num_samples}
-  max_new_tokens: 128
+# Per-step evaluation during training (VLLMManagerCallback).
+eval_callbacks:
+  dataset:
+    path: ${dataset.path}
+    split: ${dataset.val_split}
+    prompt_column: ${dataset.prompt_column}
+    summary_column: ${dataset.summary_column}
+    num_samples: ${dataset.eval_num_samples}
   vllm:
     gpu_memory_utilization: 0.5  # vLLM GPU fraction; rest stays free for the optimizer
+    max_new_tokens: 128
+  callbacks:
+    - type: rouge
 
 # Standalone final evaluation (scripts/validate/validate_sft.py).
 final_eval:
