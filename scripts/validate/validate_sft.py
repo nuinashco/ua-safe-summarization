@@ -26,7 +26,7 @@ from pathlib import Path
 from transformers import AutoTokenizer
 
 from safesum.metrics import MRougeScorer, make_uk_sentence_splitter, make_uk_tokenizer
-from val_utils import (
+from safesum.validation import (
     build_prompts,
     dataset_key,
     get_ids,

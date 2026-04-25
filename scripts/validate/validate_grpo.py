@@ -27,7 +27,7 @@ from statistics import mean
 from transformers import AutoTokenizer
 
 from safesum.training.rewards import ToxicityReward
-from val_utils import (
+from safesum.validation import (
     build_prompts,
     dataset_key,
     get_ids,
