@@ -12,9 +12,8 @@ from vllm import LLM, SamplingParams
 log = logging.getLogger(__name__)
 
 
-def dataset_key(dataset_path: str, split: str) -> str:
-    name = re.sub(r"[^a-z0-9]+", "_", dataset_path.lower().split("/")[-1])
-    return f"{name}_{split}"
+def dataset_name(dataset_path: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", dataset_path.lower().split("/")[-1])
 
 
 def load_json(path: Path) -> dict:
@@ -28,9 +27,17 @@ def save_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _deep_merge(base: dict, updates: dict) -> None:
+    for k, v in updates.items():
+        if isinstance(v, dict) and isinstance(base.get(k), dict):
+            _deep_merge(base[k], v)
+        else:
+            base[k] = v
+
+
 def update_json(path: Path, updates: dict) -> None:
     data = load_json(path)
-    data.update(updates)
+    _deep_merge(data, updates)
     save_json(path, data)
 
 

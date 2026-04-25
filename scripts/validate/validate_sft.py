@@ -28,7 +28,7 @@ from transformers import AutoTokenizer
 from safesum.metrics import MRougeScorer, make_uk_sentence_splitter, make_uk_tokenizer
 from safesum.validation import (
     build_prompts,
-    dataset_key,
+    dataset_name,
     get_ids,
     load_dataset_split,
     load_json,
@@ -49,8 +49,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--prompt-column", default="prompt")
     p.add_argument("--summary-column", default="summary")
     p.add_argument("--results-dir", default=None, help="Defaults to {model}/../results")
-    p.add_argument("--max-new-tokens", type=int, default=256)
-    p.add_argument("--gpu-memory-utilization", type=float, default=0.9)
+    p.add_argument("--max-new-tokens", type=int, default=128)
+    p.add_argument("--gpu-memory-utilization", type=float, default=0.5)
     p.add_argument("--num-samples", type=int, default=None)
     return p.parse_args()
 
@@ -64,21 +64,22 @@ def main() -> None:
 
     ds = load_dataset_split(args.dataset, args.split, args.num_samples)
     references: list[str] = list(ds[args.summary_column])
-    key = dataset_key(args.dataset, args.split)
+    name = dataset_name(args.dataset)
+    split = args.split
 
     samples = load_json(samples_path)
-    if key in samples:
-        log.info("Reusing existing predictions for '%s'", key)
-        predictions = [s["prediction"] for s in samples[key]]
+    if name in samples and split in samples[name]:
+        log.info("Reusing existing predictions for '%s/%s'", name, split)
+        predictions = [s["prediction"] for s in samples[name][split]]
     else:
-        log.info("Generating predictions for '%s'", key)
+        log.info("Generating predictions for '%s/%s'", name, split)
         tokenizer = AutoTokenizer.from_pretrained(args.model)
         prompts = build_prompts(ds, tokenizer, args.prompt_column)
         predictions = run_vllm_inference(
             args.model, prompts, args.max_new_tokens, args.gpu_memory_utilization
         )
         ids = get_ids(ds)
-        samples[key] = [{"id": sid, "prediction": pred} for sid, pred in zip(ids, predictions)]
+        samples.setdefault(name, {})[split] = [{"id": sid, "prediction": pred} for sid, pred in zip(ids, predictions)]
         save_json(samples_path, samples)
         log.info("Samples saved to %s", samples_path)
 
@@ -88,8 +89,8 @@ def main() -> None:
         sentence_splitter=make_uk_sentence_splitter(),
     )
     corpus = scorer.score_corpus(references, predictions)
-    report = {f"{key}/{k}": round(v.fmeasure * 100, 4) for k, v in corpus.items()}
-    log.info("ROUGE: %s", report)
+    report = {name: {split: {k: round(v.fmeasure * 100, 4) for k, v in corpus.items()}}}
+    log.info("ROUGE: %s", report[name][split])
 
     update_json(metrics_path, report)
     log.info("Metrics saved to %s", metrics_path)

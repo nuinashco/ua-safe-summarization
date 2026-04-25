@@ -29,7 +29,7 @@ from transformers import AutoTokenizer
 from safesum.training.rewards import ToxicityReward
 from safesum.validation import (
     build_prompts,
-    dataset_key,
+    dataset_name,
     get_ids,
     load_dataset_split,
     load_json,
@@ -55,16 +55,20 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--prompt-column", default="prompt")
     p.add_argument("--results-dir", default=None, help="Defaults to {model}/../results")
     p.add_argument("--max-new-tokens", type=int, default=128)
-    p.add_argument("--gpu-memory-utilization", type=float, default=0.9)
+    p.add_argument("--gpu-memory-utilization", type=float, default=0.5)
     return p.parse_args()
 
 
-def score_toxicity(scorer: ToxicityReward, predictions: list[str], key: str) -> dict:
+def score_toxicity(scorer: ToxicityReward, predictions: list[str], name: str, split: str) -> dict:
     scores = scorer(predictions)
     return {
-        f"{key}/tox_p_non_toxic_mean": round(mean(scores), 4),
-        f"{key}/tox_flagged_ratio": round(sum(s < 0.5 for s in scores) / len(scores), 4),
-        f"{key}/completion_word_len_mean": round(mean(len(p.split()) for p in predictions), 2),
+        name: {
+            split: {
+                "tox_p_non_toxic_mean": round(mean(scores), 4),
+                "tox_flagged_ratio": round(sum(s < 0.5 for s in scores) / len(scores), 4),
+                "completion_word_len_mean": round(mean(len(p.split()) for p in predictions), 2),
+            }
+        }
     }
 
 
@@ -75,17 +79,19 @@ def main() -> None:
     metrics_path = results_dir / "metrics.json"
     samples_path = results_dir / "samples.json"
 
-    grpo_key = dataset_key(args.grpo_dataset, args.grpo_split)
-    sft_key = dataset_key(args.sft_dataset, args.sft_split)
+    grpo_name = dataset_name(args.grpo_dataset)
+    sft_name = dataset_name(args.sft_dataset)
+    grpo_split = args.grpo_split
+    sft_split = args.sft_split
 
     samples = load_json(samples_path)
 
-    # Determine which datasets need generation: (key, dataset_path, split, num_samples)
+    # Determine which datasets need generation: (name, split, dataset_path, num_samples)
     to_generate: list[tuple[str, str, str, int | None]] = []
-    if grpo_key not in samples:
-        to_generate.append((grpo_key, args.grpo_dataset, args.grpo_split, args.grpo_num_samples))
-    if sft_key not in samples:
-        to_generate.append((sft_key, args.sft_dataset, args.sft_split, args.sft_num_samples))
+    if grpo_split not in samples.get(grpo_name, {}):
+        to_generate.append((grpo_name, grpo_split, args.grpo_dataset, args.grpo_num_samples))
+    if sft_split not in samples.get(sft_name, {}):
+        to_generate.append((sft_name, sft_split, args.sft_dataset, args.sft_num_samples))
 
     if to_generate:
         tokenizer = AutoTokenizer.from_pretrained(args.model)
@@ -93,7 +99,7 @@ def main() -> None:
         batch_prompts: list[str] = []
         batch_ids: list[list] = []
 
-        for key, ds_path, split, num_samples in to_generate:
+        for name, split, ds_path, num_samples in to_generate:
             ds = load_dataset_split(ds_path, split, num_samples)
             prompts = build_prompts(ds, tokenizer, args.prompt_column)
             batch_prompts.extend(prompts)
@@ -105,10 +111,10 @@ def main() -> None:
 
         # Split predictions back per dataset
         offset = 0
-        for (key, _, _, _), ids in zip(to_generate, batch_ids):
+        for (name, split, _, _), ids in zip(to_generate, batch_ids):
             n = len(ids)
             preds = all_predictions[offset : offset + n]
-            samples[key] = [{"id": sid, "prediction": pred} for sid, pred in zip(ids, preds)]
+            samples.setdefault(name, {})[split] = [{"id": sid, "prediction": pred} for sid, pred in zip(ids, preds)]
             offset += n
 
         save_json(samples_path, samples)
@@ -119,10 +125,10 @@ def main() -> None:
     scorer = ToxicityReward(reward_model=args.reward_model)
 
     report: dict = {}
-    for key in [grpo_key, sft_key]:
-        predictions = [s["prediction"] for s in samples[key]]
-        metrics = score_toxicity(scorer, predictions, key)
-        log.info("Toxicity [%s]: %s", key, metrics)
+    for name, split in [(grpo_name, grpo_split), (sft_name, sft_split)]:
+        predictions = [s["prediction"] for s in samples[name][split]]
+        metrics = score_toxicity(scorer, predictions, name, split)
+        log.info("Toxicity [%s/%s]: %s", name, split, metrics[name][split])
         report.update(metrics)
 
     update_json(metrics_path, report)
