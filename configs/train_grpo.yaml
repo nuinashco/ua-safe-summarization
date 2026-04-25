@@ -31,7 +31,7 @@ dataset:
   chat_template: gemma-3
   num_proc: 4
   eval_split: validation
-  eval_num_samples: 200
+  eval_num_samples: null
 
 # SFT validation slice — eval callbacks run ROUGE + toxicity here to track summary quality drift.
 sft_dataset:
@@ -83,7 +83,7 @@ training:
   # so the eval batch arrives unexpanded (unlike training which pre-repeats each prompt
   # num_generations times). With batch=8 and n=1 → 8 rewards → reshape(-1, 8) ✓
   eval_strategy: steps
-  eval_steps: 20
+  eval_steps: 500
   # Colocate vLLM uses n=1: eval prompts are NOT pre-expanded (unlike train), so rewards.numel()
   # == per_device_eval_batch_size. Must be a multiple of num_generations for reshape(-1, G) to work.
   # CANNOT use 8: Unsloth line 4234 silently overrides eval_batch=8 → train_batch when train < 8.

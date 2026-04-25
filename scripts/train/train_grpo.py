@@ -7,6 +7,7 @@ import logging
 import os
 from typing import Any
 
+import torch._dynamo
 import hydra
 from datasets import load_dataset
 from omegaconf import DictConfig, OmegaConf
@@ -35,6 +36,8 @@ log = logging.getLogger(__name__)
 
 @hydra.main(version_base=None, config_path="../../configs", config_name="train_grpo")
 def main(cfg: DictConfig) -> None:
+    torch._dynamo.config.cache_size_limit = 64
+    torch._dynamo.config.recompile_limit = 64
     log.info("Config:\n%s", OmegaConf.to_yaml(cfg))
     configure_wandb(cfg)
 
