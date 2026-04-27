@@ -112,6 +112,7 @@ Best checkpoint selected at **step 4 000** out of 5 402 total steps.
 | Precision | BF16 |
 | Gradient checkpointing | Yes |
 | Random seed | 3407 |
+| Runtime (total / eval) | ~210 min / ~50 min |
 
 ### Training dynamics
 
@@ -170,6 +171,7 @@ An additional eval callback evaluates ROUGE + toxicity on the SFT validation spl
 | Precision | BF16 |
 | Gradient checkpointing | Yes |
 | Random seed | 3407 |
+| Runtime (total / eval) | ~60 min / ~25 min |
 
 ### Training dynamics
 
